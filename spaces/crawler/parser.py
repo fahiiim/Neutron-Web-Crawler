@@ -125,3 +125,4 @@ def parse_page_content(html: str, base_url: str) -> Dict[str, Any]:
         "is_spa_empty": is_spa_empty,
         "links": links,
     }
+
