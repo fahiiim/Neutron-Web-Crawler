@@ -25,6 +25,7 @@ from dedup import (
 )
 from discovery import discover_seed_urls
 from parser import parse_page_content
+from robots import robots_manager
 from storage_r2 import r2_uploader
 
 
@@ -96,6 +97,8 @@ async def fetch_and_index_document(
 ) -> Optional[Dict[str, Any]]:
     """Fetch URL with Chrome TLS fingerprint impersonation, parse, and index.
 
+    Respects robots.txt directives and canonical deduplication rules.
+
     Args:
         session: curl_cffi AsyncSession instance.
         url: Target canonical URL string.
@@ -104,6 +107,12 @@ async def fetch_and_index_document(
         Document summary record if successfully indexed, None otherwise.
     """
     try:
+        # Check robots.txt politeness permission
+        is_allowed = await robots_manager.is_allowed(url)
+        if not is_allowed:
+            print(f"[Robots.txt Disallowed]: Skipping {url}")
+            return None
+
         response = await session.get(url, timeout=3.5)
         if response.status_code != 200:
             return None
@@ -181,7 +190,7 @@ async def fetch_and_index_document(
             "score": 1.0,
         }
     except Exception as exc:
-        print(f"[Fetch & Index Error]: {exc}")
+        print(f"[Fetch & Index Error for {url}]: {exc}")
         return None
 
 
@@ -211,7 +220,7 @@ async def background_politeness_worker() -> None:
     """Continuous background crawler loop.
 
     Fetches URLs from the Turso frontier queue at ~0.32 pages/second
-    (~27,400 pages/day), enforcing domain rate limits.
+    (~27,400 pages/day), enforcing domain rate limits and robots.txt.
     """
     await asyncio.sleep(4.0)  # Grace startup delay
     async with AsyncSession(impersonate="chrome124") as session:
@@ -225,16 +234,23 @@ async def background_politeness_worker() -> None:
                 target_url = leased["url"]
                 url_id = leased["url_hash"]
 
+                # Check if host specifies a custom Crawl-delay in robots.txt
+                custom_delay = await robots_manager.get_crawl_delay(target_url)
+                delay_to_wait = (
+                    custom_delay
+                    if custom_delay is not None
+                    else settings.BACKGROUND_FETCH_INTERVAL_SECONDS
+                )
+
                 outcome = await fetch_and_index_document(session, target_url)
                 new_status = 2 if outcome is not None else 3
                 await turso_crawler_client.update_frontier_status(url_id, new_status)
 
-                # Sustain politeness rate: ~3.1 seconds delay per request
-                await asyncio.sleep(settings.BACKGROUND_FETCH_INTERVAL_SECONDS)
+                # Sustain politeness rate
+                await asyncio.sleep(delay_to_wait)
 
             except asyncio.CancelledError:
                 break
             except Exception as exc:
                 print(f"[Background Crawler Warning]: {exc}")
                 await asyncio.sleep(5.0)
-
