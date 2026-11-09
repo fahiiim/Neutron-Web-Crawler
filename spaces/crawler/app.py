@@ -63,20 +63,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage lifecycle: initialize database connection and background worker."""
     global _bg_worker_task
     try:
-        await turso_crawler_client.connect()
-        print("[Neutron] Connected to Turso DB successfully.")
+        if (
+            settings.TURSO_DATABASE_URL
+            and "placeholder" not in settings.TURSO_AUTH_TOKEN
+        ):
+            await turso_crawler_client.connect()
+            print("[Neutron] Connected to Turso DB successfully.")
+
+            if settings.BACKGROUND_CRAWLER_ENABLED:
+                _bg_worker_task = asyncio.create_task(background_politeness_worker())
+                print("[Neutron] Background politeness crawler started.")
+        else:
+            print("[Neutron] Awaiting TURSO secrets in Space Settings.")
     except Exception as exc:
         print(f"[Neutron Startup Warning]: {exc}")
-
-    if settings.BACKGROUND_CRAWLER_ENABLED:
-        _bg_worker_task = asyncio.create_task(background_politeness_worker())
-        print("[Neutron] Background politeness crawler started.")
 
     yield
 
     if _bg_worker_task and not _bg_worker_task.done():
         _bg_worker_task.cancel()
-    await turso_crawler_client.close()
+    try:
+        await turso_crawler_client.close()
+    except Exception:
+        pass
     print("[Neutron] Shut down cleanly.")
 
 
@@ -383,4 +392,4 @@ app = gr.mount_gradio_app(app, demo, path="/gradio")
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("app:app", host="0.0.0.0", port=7860, reload=False)
+    uvicorn.run(app, host="0.0.0.0", port=7860)

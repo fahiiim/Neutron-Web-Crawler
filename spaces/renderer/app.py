@@ -52,13 +52,10 @@ def ensure_playwright_installed() -> None:
         print(f"[Renderer Playwright Install Warning]: {exc}")
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Launch persistent headless Chromium on startup and terminate on shutdown."""
+async def init_browser_async():
     global _playwright_instance, _shared_browser
-    ensure_playwright_installed()
-
     try:
+        ensure_playwright_installed()
         _playwright_instance = await async_playwright().start()
         _shared_browser = await _playwright_instance.chromium.launch(
             headless=True,
@@ -74,12 +71,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         print(f"[Renderer Browser Launch Warning]: {exc}")
 
-    yield
 
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Launch headless Chromium asynchronously on startup."""
+    asyncio.create_task(init_browser_async())
+    yield
+    global _playwright_instance, _shared_browser
     if _shared_browser is not None:
-        await _shared_browser.close()
+        try:
+            await _shared_browser.close()
+        except Exception:
+            pass
     if _playwright_instance is not None:
-        await _playwright_instance.stop()
+        try:
+            await _playwright_instance.stop()
+        except Exception:
+            pass
     print("[Renderer] Headless Chromium closed.")
 
 
@@ -157,5 +165,5 @@ app = gr.mount_gradio_app(app, demo, path="/")
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("app:app", host="0.0.0.0", port=7860, reload=False)
+    uvicorn.run(app, host="0.0.0.0", port=7860)
 
