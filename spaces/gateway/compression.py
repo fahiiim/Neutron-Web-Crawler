@@ -20,3 +20,4 @@ def decompress_text(compressed_bytes: bytes) -> str:
         return _DECOMPRESSOR.decompress(compressed_bytes).decode("utf-8")
     except Exception:
         return ""
+
