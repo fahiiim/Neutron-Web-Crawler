@@ -35,3 +35,4 @@ class GatewaySettings(BaseSettings):
 
 
 settings = GatewaySettings()
+
