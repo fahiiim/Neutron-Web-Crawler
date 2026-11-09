@@ -1,11 +1,14 @@
-# ==============================================================================
+﻿# ==============================================================================
 # Neutron Search Engine: Automated Hugging Face Spaces Deployment Script
-# Usage: .\scripts\deploy_spaces.ps1 -Username "fahiiim"
+# Usage: .\scripts\deploy_spaces.ps1 -Username "fahiiim" [-Token "hf_xxxx"]
 # ==============================================================================
 
 param (
     [Parameter(Mandatory=$false)]
-    [string]$Username = ""
+    [string]$Username = "",
+
+    [Parameter(Mandatory=$false)]
+    [string]$Token = ""
 )
 
 if (-not $Username) {
@@ -16,6 +19,8 @@ if (-not $Username) {
     Write-Host "Error: Hugging Face username is required." -ForegroundColor Red
     exit 1
 }
+
+$authPrefix = if ($Token) { "$Username:$Token@" } else { "" }
 
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "  Deploying Neutron Microservices to Hugging Face Spaces" -ForegroundColor Cyan
@@ -29,10 +34,10 @@ Write-Host "`n[1/2] Deploying 'Neutron_Renderer' Space..." -ForegroundColor Yell
 $rendererPath = Join-Path $root "spaces\renderer"
 Set-Location $rendererPath
 if (-not (Test-Path ".git")) { git init }
-git remote remove origin -ErrorAction SilentlyContinue
-git remote add origin "https://huggingface.co/spaces/$Username/Neutron_Renderer"
+git remote remove origin 2>$null
+git remote add origin "https://${authPrefix}huggingface.co/spaces/$Username/Neutron_Renderer"
 git add .
-git commit -m "Deploy stealth renderer service" -ErrorAction SilentlyContinue
+git commit -m "Deploy stealth renderer service" 2>$null
 git branch -M main
 git push -u origin main --force
 
@@ -41,10 +46,10 @@ Write-Host "`n[2/2] Deploying 'Neutron_Crawler' Space (UI + Crawler)..." -Foregr
 $crawlerPath = Join-Path $root "spaces\crawler"
 Set-Location $crawlerPath
 if (-not (Test-Path ".git")) { git init }
-git remote remove origin -ErrorAction SilentlyContinue
-git remote add origin "https://huggingface.co/spaces/$Username/Neutron_Crawler"
+git remote remove origin 2>$null
+git remote add origin "https://${authPrefix}huggingface.co/spaces/$Username/Neutron_Crawler"
 git add .
-git commit -m "Deploy unified search engine and crawler" -ErrorAction SilentlyContinue
+git commit -m "Deploy unified search engine and crawler" 2>$null
 git branch -M main
 git push -u origin main --force
 
