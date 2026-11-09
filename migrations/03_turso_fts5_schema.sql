@@ -1,7 +1,6 @@
 -- ==============================================================================
--- TURSO (LIBSQL / SQLITE) FTS5 SCHEMA
--- Purpose: Unified single-project storage with 9GB capacity and native BM25 ranking.
--- Run this directly in the Turso CLI or Web Dashboard SQL Shell.
+-- TURSO (LIBSQL / SQLITE) FTS5 SCHEMA (NO CREDIT CARD REQUIRED)
+-- Purpose: Unified single-project storage for search index, FTS5, and full text BLOBs.
 -- ==============================================================================
 
 -- 1. Domains Table (Politeness & Rate Limits)
@@ -47,9 +46,6 @@ CREATE TABLE IF NOT EXISTS search_index (
     canonical_url TEXT NOT NULL,
     title TEXT NOT NULL,
     snippet TEXT NOT NULL,
-    r2_batch_id TEXT NOT NULL,
-    r2_byte_offset INTEGER NOT NULL,
-    r2_byte_length INTEGER NOT NULL,
     opic_authority REAL NOT NULL DEFAULT 0.1,
     simhash INTEGER NOT NULL,
     crawled_at TEXT NOT NULL DEFAULT (DATE('now'))
@@ -57,7 +53,16 @@ CREATE TABLE IF NOT EXISTS search_index (
 
 CREATE INDEX IF NOT EXISTS idx_search_domain ON search_index (domain_hash);
 
--- 4. High-Performance FTS5 Virtual Table with Porter Stemmer & BM25
+-- 4. Full-Text Compressed Payloads Table (Replaces Cloudflare R2 completely!)
+-- Stores Zstd-compressed markdown directly inside Turso (9GB free, zero credit card)
+CREATE TABLE IF NOT EXISTS page_payloads (
+    url_hash INTEGER PRIMARY KEY,
+    compressed_text BLOB NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+    FOREIGN KEY (url_hash) REFERENCES search_index(url_hash) ON DELETE CASCADE
+);
+
+-- 5. High-Performance FTS5 Virtual Table with Porter Stemmer & BM25
 CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
     title,
     snippet,
@@ -85,7 +90,7 @@ CREATE TRIGGER IF NOT EXISTS search_index_au AFTER UPDATE ON search_index BEGIN
   VALUES (new.url_hash, new.title, new.snippet, new.canonical_url);
 END;
 
--- 5. Hot Topics Lexicon
+-- 6. Hot Topics Lexicon
 CREATE TABLE IF NOT EXISTS hot_topics (
     term TEXT PRIMARY KEY,
     frequency INTEGER NOT NULL DEFAULT 1,
@@ -94,4 +99,3 @@ CREATE TABLE IF NOT EXISTS hot_topics (
 
 CREATE INDEX IF NOT EXISTS idx_hot_topics_freq 
 ON hot_topics (frequency DESC, last_searched_at DESC);
-

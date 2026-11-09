@@ -33,13 +33,11 @@ class TursoCrawlerClient:
         canonical_url: str,
         title: str,
         snippet: str,
-        r2_batch_id: str,
-        r2_byte_offset: int,
-        r2_byte_length: int,
         opic_authority: float,
         simhash: int,
+        compressed_text: Optional[bytes] = None,
     ) -> bool:
-        """Insert or update indexed page metadata and trigger FTS synchronization.
+        """Insert or update indexed page metadata and payload directly in Turso.
 
         Args:
             url_hash: Signed 64-bit primary key.
@@ -47,11 +45,9 @@ class TursoCrawlerClient:
             canonical_url: Clean URL string.
             title: Document title.
             snippet: Short search result summary.
-            r2_batch_id: Key pointing to R2 object.
-            r2_byte_offset: Byte offset in batch.
-            r2_byte_length: Byte length in batch.
             opic_authority: Authority score (0.0 to 1.0).
             simhash: 64-bit Charikar SimHash.
+            compressed_text: Optional Zstandard-compressed full markdown payload.
 
         Returns:
             True if write succeeded.
@@ -59,47 +55,48 @@ class TursoCrawlerClient:
         if self._client is None:
             await self.connect()
 
-        sql = """
+        sql_index = """
         INSERT INTO search_index (
             url_hash, domain_hash, canonical_url, title, snippet,
-            r2_batch_id, r2_byte_offset, r2_byte_length, opic_authority, simhash
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            opic_authority, simhash
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (url_hash) DO UPDATE SET
             title = excluded.title,
             snippet = excluded.snippet,
-            r2_batch_id = excluded.r2_batch_id,
             opic_authority = excluded.opic_authority;
         """
         try:
             await self._client.execute(
-                sql,
+                sql_index,
                 [
                     url_hash,
                     domain_hash,
                     canonical_url,
                     title,
                     snippet,
-                    r2_batch_id,
-                    r2_byte_offset,
-                    r2_byte_length,
                     opic_authority,
                     simhash,
                 ],
             )
+
+            # Store compressed text payload directly in Turso (eliminating Cloudflare R2!)
+            if compressed_text:
+                sql_payload = """
+                INSERT INTO page_payloads (url_hash, compressed_text)
+                VALUES (?, ?)
+                ON CONFLICT(url_hash) DO UPDATE SET
+                    compressed_text = excluded.compressed_text,
+                    updated_at = DATETIME('now');
+                """
+                await self._client.execute(sql_payload, [url_hash, compressed_text])
+
             return True
         except Exception as exc:
             print(f"[Turso Insert Error]: {exc}")
             return False
 
     async def enqueue_frontier_urls(self, urls: List[Dict[str, Any]]) -> int:
-        """Batch insert discovered outbound URLs into the frontier queue.
-
-        Args:
-            urls: List of dicts containing url_hash, domain_hash, url, priority.
-
-        Returns:
-            Count of successfully enqueued URLs.
-        """
+        """Batch insert discovered outbound URLs into the frontier queue."""
         if self._client is None:
             await self.connect()
 
@@ -145,7 +142,6 @@ class TursoCrawlerClient:
             row = rs.rows[0]
             url_hash = int(row["url_hash"])
 
-            # Atomically mark as leased (status = 1)
             await self._client.execute(
                 "UPDATE frontier_queue SET status = 1 WHERE url_hash = ?",
                 [url_hash],
@@ -174,4 +170,3 @@ class TursoCrawlerClient:
 
 
 turso_crawler_client = TursoCrawlerClient()
-

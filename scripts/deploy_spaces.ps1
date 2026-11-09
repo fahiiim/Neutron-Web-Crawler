@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 # Neutron Search Engine: Automated Hugging Face Spaces Deployment Script
 # Usage: .\scripts\deploy_spaces.ps1 -Username "your-hf-username"
 # ==============================================================================
@@ -69,3 +69,4 @@ Write-Host "  - INTERNAL_API_KEY" -ForegroundColor White
 Write-Host "  - TURSO_DATABASE_URL and TURSO_AUTH_TOKEN" -ForegroundColor White
 Write-Host "  - R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT_URL" -ForegroundColor White
 Write-Host "==========================================================" -ForegroundColor Green
+

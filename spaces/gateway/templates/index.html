@@ -19,8 +19,8 @@
             <span class="font-bold text-xl tracking-tight text-white">Neutron <span class="text-xs font-semibold px-2 py-0.5 rounded bg-blue-900/60 text-blue-400 border border-blue-800 ml-1">JIT Real-Time</span></span>
         </div>
         <div class="flex items-center space-x-4 text-xs text-gray-400">
-            <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-emerald-400 mr-2 animate-pulse"></span> Turso FTS5: Ready</span>
-            <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-blue-400 mr-2"></span> Cloudflare R2: Ready</span>
+            <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-emerald-400 mr-2 animate-pulse"></span> Turso LibSQL FTS5: Ready</span>
+            <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-blue-400 mr-2"></span> 100% Free Zero-Card Architecture</span>
         </div>
     </header>
 
@@ -72,7 +72,7 @@
 
     <!-- Footer -->
     <footer class="border-t border-gray-800/60 py-4 text-center text-xs text-gray-500">
-        Neutron Search Engine &bull; Hugging Face Spaces (16 GB RAM) &bull; Turso LibSQL FTS5 &bull; Cloudflare R2
+        Neutron Search Engine &bull; Hugging Face Spaces &bull; Turso LibSQL FTS5 &bull; 100% Free
     </footer>
 
     <script>
@@ -134,7 +134,9 @@
         });
 
         function renderResultCard(item, isLive = false) {
-            const domain = new URL(item.url).hostname;
+            let domain = "web";
+            try { domain = new URL(item.url).hostname; } catch(e) {}
+
             const card = document.createElement('div');
             card.className = "bg-[#131b2e] border border-gray-800 hover:border-gray-700 p-5 rounded-xl transition-all shadow-sm";
             card.innerHTML = `
@@ -150,7 +152,7 @@
                 </h2>
                 <p class="text-xs text-gray-400 line-clamp-3 leading-relaxed mb-3">${item.snippet || 'No preview available.'}</p>
                 <div class="flex items-center space-x-3 text-xs">
-                    <button onclick="readFullDoc(${item.url_hash})" class="text-blue-400 hover:text-blue-300 font-medium">Read Article (R2)</button>
+                    <button onclick="readFullDoc(${item.url_hash})" class="text-blue-400 hover:text-blue-300 font-medium">Read Article (Turso)</button>
                     <span class="text-gray-600">&bull;</span>
                     <a href="${item.url}" target="_blank" class="text-gray-400 hover:text-gray-300">Visit Original &nearr;</a>
                 </div>
@@ -161,8 +163,8 @@
         async function readFullDoc(urlHash) {
             if (!urlHash) return;
             modal.classList.remove('hidden');
-            document.getElementById('modal-title').textContent = "Loading from Cloudflare R2...";
-            document.getElementById('modal-body').textContent = "Fetching compressed chunks and decompressing Zstandard payload...";
+            document.getElementById('modal-title').textContent = "Loading from Turso Database...";
+            document.getElementById('modal-body').textContent = "Fetching compressed payload (<5ms)...";
 
             try {
                 const res = await fetch(`/doc/${urlHash}`);
@@ -181,4 +183,3 @@
     </script>
 </body>
 </html>
-

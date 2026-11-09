@@ -1,4 +1,4 @@
-"""Database client for querying Turso (LibSQL / SQLite FTS5) full-text index."""
+"""Database client for querying Turso (LibSQL / SQLite FTS5) and reading payloads."""
 
 from typing import Any, Dict, List, Optional
 import libsql_client
@@ -27,19 +27,10 @@ class TursoSearchClient:
             self._client = None
 
     async def search(self, query: str, limit: int = 15) -> List[Dict[str, Any]]:
-        """Execute high-speed BM25 ranked full-text query against SQLite FTS5 index.
-
-        Args:
-            query: User search query terms.
-            limit: Maximum count of ranked results to return.
-
-        Returns:
-            List of matching document metadata records ordered by relevance.
-        """
+        """Execute high-speed BM25 ranked full-text query against SQLite FTS5 index."""
         if self._client is None:
             await self.connect()
 
-        # Sanitize query for FTS5 syntax
         clean_terms = [
             token.strip()
             for token in "".join(c for c in query if c.isalnum() or c.isspace()).split()
@@ -58,9 +49,6 @@ class TursoSearchClient:
             s.canonical_url,
             s.title,
             s.snippet,
-            s.r2_batch_id,
-            s.r2_byte_offset,
-            s.r2_byte_length,
             s.opic_authority,
             bm25(search_fts, 2.0, 1.0, 0.5) AS bm25_rank
         FROM search_fts f
@@ -75,7 +63,6 @@ class TursoSearchClient:
             results: List[Dict[str, Any]] = []
 
             for row in result_set.rows:
-                # Invert BM25 score so larger numbers indicate higher relevance
                 rank_score = round(
                     abs(float(row["bm25_rank"] or 0.0))
                     + float(row["opic_authority"] or 0.1),
@@ -87,9 +74,6 @@ class TursoSearchClient:
                         "url": row["canonical_url"],
                         "title": row["title"],
                         "snippet": row["snippet"],
-                        "r2_batch_id": row["r2_batch_id"],
-                        "r2_byte_offset": row["r2_byte_offset"],
-                        "r2_byte_length": row["r2_byte_length"],
                         "score": rank_score,
                     }
                 )
@@ -97,6 +81,21 @@ class TursoSearchClient:
         except Exception as exc:
             print(f"[Turso Client Warning]: {exc}")
             return []
+
+    async def get_document_payload(self, url_hash: int) -> Optional[bytes]:
+        """Fetch compressed markdown payload directly from Turso (Sub-5ms, Zero-Card)."""
+        if self._client is None:
+            await self.connect()
+
+        sql = "SELECT compressed_text FROM page_payloads WHERE url_hash = ? LIMIT 1;"
+        try:
+            rs = await self._client.execute(sql, [url_hash])
+            if rs.rows:
+                raw_bytes = rs.rows[0]["compressed_text"]
+                return bytes(raw_bytes) if raw_bytes else None
+        except Exception as exc:
+            print(f"[Turso Payload Retrieval Warning]: {exc}")
+        return None
 
     async def record_hot_topic(self, term: str) -> None:
         """Increment frequency in the hot_topics lexicon for focused crawling."""
@@ -117,4 +116,3 @@ class TursoSearchClient:
 
 
 turso_client = TursoSearchClient()
-

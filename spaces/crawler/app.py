@@ -28,7 +28,6 @@ from dedup import (
 from discovery import discover_seed_urls
 from parser import parse_page_content
 from robots import robots_manager
-from storage_r2 import r2_uploader
 
 
 class JITCrawlRequest(BaseModel):
@@ -136,25 +135,17 @@ async def fetch_and_index_document(
 
         # Compress text payload with Zstandard
         compressed = compress_text(extracted["text"])
-        chunk_key = f"chunk_{time.strftime('%Y%m%d')}.zst"
-        offset = 0
-        length = len(compressed)
 
-        # Upload payload to Cloudflare R2
-        await r2_uploader.put_chunk(chunk_key, compressed)
-
-        # Write index metadata into Turso FTS5
+        # Store index metadata and compressed payload directly in Turso (Zero-Card Solution!)
         await turso_crawler_client.insert_search_index(
             url_hash=url_id,
             domain_hash=domain_id,
             canonical_url=url,
             title=extracted["title"],
             snippet=extracted["snippet"],
-            r2_batch_id=chunk_key,
-            r2_byte_offset=offset,
-            r2_byte_length=length,
             opic_authority=0.25,
             simhash=simhash_val,
+            compressed_text=compressed,
         )
 
         # Enqueue discovered outbound links into frontier queue
@@ -241,7 +232,7 @@ async def background_politeness_worker() -> None:
 with gr.Blocks(title="Neutron Crawler Worker") as demo:
     gr.Markdown("# 🕷️ Neutron Crawler Worker")
     gr.Markdown("Active dual-mode JIT fetcher and politeness background crawler worker.")
-    gr.Markdown("Status: **Active** • Target Throughput: **~27,400 pages/day**")
+    gr.Markdown("Status: **Active** • Engine: **Turso BLOB + LibSQL FTS5 (100% Free, No Card)**")
 
 app = gr.mount_gradio_app(app, demo, path="/")
 
@@ -249,4 +240,3 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run("app:app", host="0.0.0.0", port=7860, reload=False)
-

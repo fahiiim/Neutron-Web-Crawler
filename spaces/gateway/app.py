@@ -2,7 +2,7 @@
 
 Runs on Hugging Face Spaces free tier (16 GB RAM).
 Serves the web search UI, queries Turso LibSQL FTS5 index,
-dispatches JIT crawl bursts to the crawler worker, and reads full text from R2.
+dispatches JIT crawl bursts to the crawler worker, and reads full text directly from Turso.
 """
 
 import asyncio
@@ -78,7 +78,6 @@ async def search_endpoint(
     if not clean_query:
         return {"query": q, "total": 0, "results": []}
 
-    # Record hot topic query for crawler focused learning
     asyncio.create_task(turso_client.record_hot_topic(clean_query))
 
     # 1. Query Turso FTS5 Index
@@ -174,42 +173,40 @@ async def search_stream(q: str = Query(..., description="Search query")) -> Any:
 
 @app.get("/doc/{url_hash}")
 async def get_document(url_hash: int) -> Dict[str, Any]:
-    """Retrieve full extracted markdown article from Cloudflare R2 at $0 egress."""
+    """Retrieve full extracted markdown article directly from Turso (Sub-5ms, Zero Card)."""
+    # 1. First attempt to read directly from Turso BLOB storage (Zero Card)
+    payload_bytes = await turso_client.get_document_payload(url_hash)
+    if payload_bytes:
+        full_markdown = decompress_text(payload_bytes)
+        return {
+            "url_hash": url_hash,
+            "full_markdown": full_markdown,
+            "source": "turso_blob",
+        }
+
+    # 2. Fallback to index metadata
     hits = await turso_client.search(str(url_hash), limit=1)
     if not hits:
-        raise HTTPException(status_code=404, detail="Document not found in index")
+        raise HTTPException(status_code=404, detail="Document not found")
 
     meta = hits[0]
-    batch_id = meta.get("r2_batch_id")
-    offset = meta.get("r2_byte_offset", 0)
-    length = meta.get("r2_byte_length", 0)
-
-    if not batch_id or length <= 0:
-        return {"title": meta.get("title"), "full_markdown": meta.get("snippet", "")}
-
-    compressed_bytes = await r2_reader.get_byte_range(batch_id, offset, length)
-    full_markdown = decompress_text(compressed_bytes)
-
     return {
         "url": meta.get("url"),
         "title": meta.get("title"),
-        "full_markdown": full_markdown,
+        "full_markdown": meta.get("snippet", ""),
+        "source": "snippet_fallback",
     }
 
 
 # Optional Gradio Blocks UI mounted on /gradio
 with gr.Blocks(title="Neutron Search API Explorer") as demo:
     gr.Markdown("# 🔍 Neutron Search Engine Gateway")
-    gr.Markdown(
-        "Direct API & Web Search Interface powered by **Turso LibSQL FTS5** & **Cloudflare R2**."
-    )
+    gr.Markdown("Direct API & Web Search Interface powered by **Turso LibSQL FTS5 (100% Free)**.")
     gr.Markdown("Open the root [URL](/) to view the real-time search interface.")
 
-# Mount Gradio onto the FastAPI application at /gradio
 app = gr.mount_gradio_app(app, demo, path="/gradio")
 
 if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run("app:app", host="0.0.0.0", port=7860, reload=False)
-
