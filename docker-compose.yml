@@ -1,0 +1,57 @@
+version: "3.8"
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
+    container_name: svc-search-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=development
+      - TURSO_DATABASE_URL=${TURSO_DATABASE_URL}
+      - TURSO_AUTH_TOKEN=${TURSO_AUTH_TOKEN}
+      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+      - R2_BUCKET_NAME=${R2_BUCKET_NAME:-neutron-page-cache}
+      - R2_ENDPOINT_URL=${R2_ENDPOINT_URL}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-neutron_secret_key_32}
+      - CRAWLER_SERVICE_URL=http://crawler:8001
+      - RENDERER_SERVICE_URL=http://renderer:8002
+    depends_on:
+      - crawler
+
+  crawler:
+    build:
+      context: .
+      dockerfile: services/crawler/Dockerfile
+    container_name: svc-crawler-worker
+    ports:
+      - "8001:8001"
+    environment:
+      - ENVIRONMENT=development
+      - TURSO_DATABASE_URL=${TURSO_DATABASE_URL}
+      - TURSO_AUTH_TOKEN=${TURSO_AUTH_TOKEN}
+      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+      - R2_BUCKET_NAME=${R2_BUCKET_NAME:-neutron-page-cache}
+      - R2_ENDPOINT_URL=${R2_ENDPOINT_URL}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-neutron_secret_key_32}
+      - RENDERER_SERVICE_URL=http://renderer:8002
+    depends_on:
+      - renderer
+
+  renderer:
+    build:
+      context: .
+      dockerfile: services/renderer/Dockerfile
+    container_name: svc-stealth-renderer
+    ports:
+      - "8002:8002"
+    environment:
+      - ENVIRONMENT=development
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-neutron_secret_key_32}
+

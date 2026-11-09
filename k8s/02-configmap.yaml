@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: neutron-config
+  namespace: neutron
+data:
+  ENVIRONMENT: "production"
+  TURSO_DATABASE_URL: "libsql://neutron-db-demo.turso.io"
+  R2_BUCKET_NAME: "neutron-page-cache"
+  R2_ENDPOINT_URL: "https://your_account_id.r2.cloudflarestorage.com"
+  GATEWAY_SERVICE_URL: "http://svc-search-gateway.neutron.svc.cluster.local:8000"
+  CRAWLER_SERVICE_URL: "http://svc-crawler-worker.neutron.svc.cluster.local:8001"
+  RENDERER_SERVICE_URL: "http://svc-stealth-renderer.neutron.svc.cluster.local:8002"
+  MAX_CONCURRENT_JIT_FETCHES: "12"
+  DEFAULT_CRAWL_DELAY_MS: "1500"
+
