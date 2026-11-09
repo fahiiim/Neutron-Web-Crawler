@@ -135,3 +135,4 @@ async def render_page_endpoint(request: RenderRequest) -> Dict[str, Any]:
     finally:
         await page.close()
         await context.close()
+
