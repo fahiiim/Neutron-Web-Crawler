@@ -1,4 +1,4 @@
-# ==============================================================================
+﻿# ==============================================================================
 # Neutron Search Engine: Automated Hugging Face Spaces Deployment Script
 # Usage: .\scripts\deploy_spaces.ps1 -Username "fahiiim" [-Token "hf_xxxx"]
 # ==============================================================================
@@ -20,7 +20,7 @@ if (-not $Username) {
     exit 1
 }
 
-$authPrefix = if ($Token) { "$Username:$Token@" } else { "" }
+$authPrefix = if ($Token) { "${Username}:${Token}@" } else { "" }
 
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "  Deploying Neutron Microservices to Hugging Face Spaces" -ForegroundColor Cyan
