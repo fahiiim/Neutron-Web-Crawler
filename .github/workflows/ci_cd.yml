@@ -1,0 +1,96 @@
+name: Neutron CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Run Unit Tests & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Test Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install xxhash zstandard pydantic pydantic-settings
+
+      - name: Execute Test Suite
+        run: |
+          python -m unittest discover tests
+
+  database-migration:
+    name: Apply Turso Database Migrations
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Migration Dependencies
+        run: |
+          pip install libsql-client python-dotenv
+
+      - name: Run Schema Migration Against Turso
+        run: |
+          python scripts/init_turso.py
+
+  deploy-huggingface:
+    name: Deploy to Hugging Face Spaces
+    needs: database-migration
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Deploy Neutron_Renderer Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_USERNAME: ${{ secrets.HF_USERNAME || 'fahiiim' }}
+        run: |
+          cd spaces/renderer
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git init
+          git remote add hf "https://$HF_USERNAME:$HF_TOKEN@huggingface.co/spaces/$HF_USERNAME/Neutron_Renderer"
+          git add .
+          git commit -m "ci: automated deployment from commit ${{ github.sha }}" || true
+          git branch -M main
+          git push hf main --force
+
+      - name: Deploy Neutron_Crawler Space (Unified Gateway + Crawler)
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_USERNAME: ${{ secrets.HF_USERNAME || 'fahiiim' }}
+        run: |
+          cd spaces/crawler
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git init
+          git remote add hf "https://$HF_USERNAME:$HF_TOKEN@huggingface.co/spaces/$HF_USERNAME/Neutron_Crawler"
+          git add .
+          git commit -m "ci: automated deployment from commit ${{ github.sha }}" || true
+          git branch -M main
+          git push hf main --force

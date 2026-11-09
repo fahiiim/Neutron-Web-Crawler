@@ -15,8 +15,13 @@ class TursoCrawlerClient:
     async def connect(self) -> None:
         """Establish persistent async client session to Turso."""
         if self._client is None:
-            self._client = libsql_client.create_client_async(
-                url=settings.TURSO_DATABASE_URL,
+            clean_url = (
+                settings.TURSO_DATABASE_URL.replace("libsql://", "https://")
+                if settings.TURSO_DATABASE_URL.startswith("libsql://")
+                else settings.TURSO_DATABASE_URL
+            )
+            self._client = libsql_client.create_client(
+                url=clean_url,
                 auth_token=settings.TURSO_AUTH_TOKEN,
             )
 

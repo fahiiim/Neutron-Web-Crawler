@@ -25,8 +25,9 @@ async def test_turso() -> bool:
 
     try:
         import libsql_client
+        clean_url = TURSO_URL.replace("libsql://", "https://") if TURSO_URL.startswith("libsql://") else TURSO_URL
         t0 = time.perf_counter()
-        client = libsql_client.create_client_async(url=TURSO_URL, auth_token=TURSO_TOKEN)
+        client = libsql_client.create_client(url=clean_url, auth_token=TURSO_TOKEN)
         rs = await client.execute("SELECT 1 AS alive;")
         elapsed = round((time.perf_counter() - t0) * 1000, 2)
         await client.close()

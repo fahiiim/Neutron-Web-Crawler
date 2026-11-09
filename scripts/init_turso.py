@@ -26,8 +26,9 @@ async def main() -> None:
         print(f"Error: Migration schema file not found at {SCHEMA_PATH}")
         sys.exit(1)
 
-    print(f"Connecting to Turso: {TURSO_URL}")
-    client = libsql_client.create_client_async(url=TURSO_URL, auth_token=TURSO_TOKEN)
+    clean_url = TURSO_URL.replace("libsql://", "https://") if TURSO_URL.startswith("libsql://") else TURSO_URL
+    print(f"Connecting to Turso: {clean_url}")
+    client = libsql_client.create_client(url=clean_url, auth_token=TURSO_TOKEN)
 
     try:
         with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
