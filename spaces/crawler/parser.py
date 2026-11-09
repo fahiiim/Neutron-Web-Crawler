@@ -3,7 +3,10 @@
 import json
 from typing import Any, Dict, List
 import urllib.parse
-from selectolax.parser import HTMLParser
+try:
+    from selectolax.lexbor import LexborHTMLParser as HTMLParser
+except ImportError:
+    from selectolax.parser import HTMLParser
 
 from dedup import canonicalize_url
 
