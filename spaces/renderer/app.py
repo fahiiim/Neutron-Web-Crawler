@@ -169,6 +169,10 @@ with gr.Blocks(title="Neutron Stealth Renderer") as demo:
     gr.Markdown("# 🎭 Neutron Stealth Renderer")
     gr.Markdown("Isolated headless Chromium browser service for dynamic SPAs and WAF bypass.")
     gr.Markdown("Status: **Active** • Engine: **Playwright Chromium**")
+    try:
+        demo.load(_zero_gpu_guard)
+    except Exception:
+        pass
 
 app = gr.mount_gradio_app(app, demo, path="/")
 

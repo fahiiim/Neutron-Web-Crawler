@@ -396,6 +396,10 @@ with gr.Blocks(title="Neutron Engine Explorer") as demo:
     gr.Markdown("# 🚀 Neutron Real-Time Search Engine")
     gr.Markdown("Unified search gateway and crawler worker.")
     gr.Markdown("Open the root [URL](/) to use the web search interface.")
+    try:
+        demo.load(_zero_gpu_guard)
+    except Exception:
+        pass
 
 app = gr.mount_gradio_app(app, demo, path="/gradio")
 
