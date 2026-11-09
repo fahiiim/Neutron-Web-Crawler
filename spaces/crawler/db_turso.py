@@ -174,3 +174,4 @@ class TursoCrawlerClient:
 
 
 turso_crawler_client = TursoCrawlerClient()
+
