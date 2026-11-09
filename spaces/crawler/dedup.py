@@ -136,3 +136,4 @@ def compute_simhash(text: str) -> int:
     if fingerprint >= (1 << 63):
         fingerprint -= 1 << 64
     return fingerprint
+
