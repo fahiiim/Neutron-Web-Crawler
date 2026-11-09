@@ -15,3 +15,4 @@ Isolated headless Chromium browser microservice for dynamic SPAs and client-rend
 - **Asset Interceptor**: Aborts fonts, stylesheets, images, and trackers via `route.abort()` to maintain minimal RAM usage.
 - **Port**: `7860`
 - **RAM**: 16 GB (Free HF Space - Zero OOM crashes)
+
