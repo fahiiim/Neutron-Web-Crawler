@@ -1,13 +1,13 @@
 """Meta-search discovery adapters resilient against datacenter IP rate limits.
 
-Integrates real-time DuckDuckGo HTML web search with Chrome impersonation,
-Wikipedia full-text search, and HackerNews Algolia.
+Integrates real-time DuckDuckGo HTML search, Wikipedia full-text query,
+and HackerNews Algolia with query normalization and domain diversity.
 """
 
 import asyncio
+import re
 from typing import List, Set
 import urllib.parse
-from curl_cffi.requests import AsyncSession
 import httpx
 from selectolax.lexbor import LexborHTMLParser
 
@@ -23,12 +23,23 @@ WIKI_USER_AGENT = (
 )
 
 
-async def _discover_duckduckgo(session: AsyncSession, query: str) -> List[str]:
-    """Discover real-time web results via DuckDuckGo HTML using Chrome impersonation."""
+def _strip_question_framing(query: str) -> str:
+    """Normalize conversational question queries to extract key search entities."""
+    cleaned = re.sub(
+        r"^(what\s+is\s+(the\s+)?(name\s+of\s+)?|who\s+is\s+(the\s+)?|tell\s+me\s+about\s+|can\s+you\s+find\s+|how\s+to\s+|which\s+is\s+)",
+        "",
+        query.strip(),
+        flags=re.IGNORECASE,
+    ).strip()
+    return cleaned if cleaned else query.strip()
+
+
+async def _discover_duckduckgo_html(client: httpx.AsyncClient, query: str) -> List[str]:
+    """Discover real-time web results via DuckDuckGo HTML."""
     urls: List[str] = []
     try:
         url = "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote(query)
-        resp = await session.get(url, timeout=5.0)
+        resp = await client.get(url, timeout=5.0)
         if resp.status_code == 200:
             tree = LexborHTMLParser(resp.text)
             for a in tree.css("a"):
@@ -44,15 +55,20 @@ async def _discover_duckduckgo(session: AsyncSession, query: str) -> List[str]:
     return urls
 
 
-async def _discover_wikipedia_fulltext(client: httpx.AsyncClient, query: str) -> List[str]:
+async def _discover_wikipedia_fulltext(
+    client: httpx.AsyncClient, query: str
+) -> List[str]:
     """Discover high-authority Wikipedia encyclopedic articles via full-text search."""
     urls: List[str] = []
+    clean_q = _strip_question_framing(query)
     try:
         url = (
             f"https://en.wikipedia.org/w/api.php?action=query&list=search"
-            f"&srsearch={urllib.parse.quote(query)}&utf8=&format=json"
+            f"&srsearch={urllib.parse.quote(clean_q)}&utf8=&format=json"
         )
-        resp = await client.get(url, headers={"User-Agent": WIKI_USER_AGENT}, timeout=4.0)
+        resp = await client.get(
+            url, headers={"User-Agent": WIKI_USER_AGENT}, timeout=4.0
+        )
         if resp.status_code == 200:
             data = resp.json()
             for hit in data.get("query", {}).get("search", [])[:8]:
@@ -66,9 +82,10 @@ async def _discover_wikipedia_fulltext(client: httpx.AsyncClient, query: str) ->
 async def _discover_hackernews(client: httpx.AsyncClient, query: str) -> List[str]:
     """Discover programming, tech, and engineering articles via Algolia HN."""
     urls: List[str] = []
+    clean_q = _strip_question_framing(query)
     try:
         url = (
-            f"https://hn.algolia.com/api/v1/search?query={urllib.parse.quote(query)}"
+            f"https://hn.algolia.com/api/v1/search?query={urllib.parse.quote(clean_q)}"
             f"&tags=story&hitsPerPage=8"
         )
         resp = await client.get(url, timeout=3.5)
@@ -97,20 +114,23 @@ async def discover_seed_urls(query: str, max_urls: int = 12) -> List[str]:
         List of canonicalized seed URLs.
     """
     discovered: List[str] = []
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
 
-    # Parallel discovery across primary web and knowledge engines
-    async with AsyncSession(impersonate="chrome124") as curl_session:
-        async with httpx.AsyncClient(timeout=4.5) as http_client:
-            ddg_task = _discover_duckduckgo(curl_session, query)
-            wiki_task = _discover_wikipedia_fulltext(http_client, query)
-            hn_task = _discover_hackernews(http_client, query)
+    async with httpx.AsyncClient(headers=headers, timeout=5.5, follow_redirects=True) as client:
+        ddg_task = _discover_duckduckgo_html(client, query)
+        wiki_task = _discover_wikipedia_fulltext(client, query)
+        hn_task = _discover_hackernews(client, query)
 
-            results = await asyncio.gather(
-                ddg_task, wiki_task, hn_task, return_exceptions=True
-            )
-            for res in results:
-                if isinstance(res, list):
-                    discovered.extend(res)
+        results = await asyncio.gather(
+            ddg_task, wiki_task, hn_task, return_exceptions=True
+        )
+        for res in results:
+            if isinstance(res, list):
+                discovered.extend(res)
 
     # Canonicalize and apply domain diversity constraint
     seen_domains: Set[str] = set()

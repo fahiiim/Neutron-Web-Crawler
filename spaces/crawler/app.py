@@ -287,27 +287,32 @@ async def get_document(url_hash: int) -> Dict[str, Any]:
 async def fetch_and_index_document(
     session: AsyncSession,
     url: str,
+    check_robots: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Fetch URL with Chrome TLS fingerprint impersonation, parse, and index."""
     try:
-        is_allowed = await robots_manager.is_allowed(url)
-        if not is_allowed:
-            return None
+        if check_robots:
+            is_allowed = await robots_manager.is_allowed(url)
+            if not is_allowed:
+                return None
 
-        response = await session.get(url, timeout=3.5)
-        if response.status_code != 200:
-            return None
+        extracted = None
 
-        content_type = response.headers.get("content-type", "")
-        if "text/html" not in content_type:
-            return None
+        try:
+            response = await session.get(url, timeout=4.5)
+            if response.status_code == 200:
+                content_type = response.headers.get("content-type", "")
+                if "text/html" in content_type:
+                    parsed = parse_page_content(response.text, url)
+                    if not parsed.get("is_spa_empty"):
+                        extracted = parsed
+        except Exception:
+            pass
 
-        extracted = parse_page_content(response.text, url)
-
-        # Stage 3 Escalation: Headless browser fallback if page is an empty client SPA
-        if extracted["is_spa_empty"]:
+        # Stage 3 Escalation: Headless browser fallback if direct fetch was blocked (403/503) or is dynamic SPA
+        if not extracted and settings.RENDERER_SERVICE_URL:
             try:
-                async with httpx.AsyncClient(timeout=5.5) as client:
+                async with httpx.AsyncClient(timeout=6.0) as client:
                     rend_resp = await client.post(
                         f"{settings.RENDERER_SERVICE_URL}/render",
                         json={"url": url},
@@ -315,11 +320,18 @@ async def fetch_and_index_document(
                     )
                     if rend_resp.status_code == 200:
                         rendered = rend_resp.json()
-                        extracted["title"] = rendered.get("title", extracted["title"])
-                        extracted["snippet"] = rendered.get("snippet", extracted["snippet"])
-                        extracted["text"] = rendered.get("text", extracted["text"])
+                        if rendered.get("text"):
+                            extracted = {
+                                "title": rendered.get("title", url),
+                                "snippet": rendered.get("snippet", ""),
+                                "text": rendered.get("text", ""),
+                                "links": [],
+                            }
             except Exception as exc:
                 print(f"[Renderer Escalation Error]: {exc}")
+
+        if not extracted or not extracted.get("text"):
+            return None
 
         url_id = hash_url(url)
         domain_id = hash_domain(extract_domain_host(url))
@@ -407,7 +419,9 @@ async def background_politeness_worker() -> None:
                     else settings.BACKGROUND_FETCH_INTERVAL_SECONDS
                 )
 
-                outcome = await fetch_and_index_document(session, target_url)
+                outcome = await fetch_and_index_document(
+                    session, target_url, check_robots=True
+                )
                 new_status = 2 if outcome is not None else 3
                 await turso_crawler_client.update_frontier_status(url_id, new_status)
 
