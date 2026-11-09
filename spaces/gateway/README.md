@@ -19,3 +19,4 @@ The public query coordinator and interactive search UI for the Neutron Web Searc
   - Executes sub-15ms BM25 ranking queries against Turso LibSQL FTS5.
   - Cascades sparse/miss queries to `neutron-crawler` via Server-Sent Events (SSE).
   - Fetches and decompresses full markdown articles on demand from Cloudflare R2.
+
