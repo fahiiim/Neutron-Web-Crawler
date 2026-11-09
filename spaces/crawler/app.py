@@ -22,6 +22,26 @@ except Exception:
     def _zero_gpu_guard() -> str:
         return "Neutron Search Engine Online"
 
+
+def _notify_zerogpu_startup() -> None:
+    """Explicitly trigger ZeroGPU startup report if running under ZeroGPU container."""
+    try:
+        import spaces.zero
+
+        if hasattr(spaces.zero, "startup"):
+            spaces.zero.startup()
+            print("[Neutron] ZeroGPU startup report notified.")
+        else:
+            import spaces.zero.client as zero_client
+
+            zero_client.startup_report()
+            print("[Neutron] ZeroGPU client startup report notified.")
+    except Exception as exc:
+        print(f"[Neutron ZeroGPU Notification Info]: {exc}")
+
+
+_notify_zerogpu_startup()
+
 from curl_cffi.requests import AsyncSession
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -73,6 +93,7 @@ _bg_worker_task: Optional[asyncio.Task] = None
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage lifecycle: initialize database connection and background worker."""
     global _bg_worker_task
+    _notify_zerogpu_startup()
     try:
         if (
             settings.TURSO_DATABASE_URL

@@ -22,6 +22,26 @@ except Exception:
     def _zero_gpu_guard() -> str:
         return "Neutron Stealth Renderer Online"
 
+
+def _notify_zerogpu_startup() -> None:
+    """Explicitly trigger ZeroGPU startup report if running under ZeroGPU container."""
+    try:
+        import spaces.zero
+
+        if hasattr(spaces.zero, "startup"):
+            spaces.zero.startup()
+            print("[Renderer] ZeroGPU startup report notified.")
+        else:
+            import spaces.zero.client as zero_client
+
+            zero_client.startup_report()
+            print("[Renderer] ZeroGPU client startup report notified.")
+    except Exception as exc:
+        print(f"[Renderer ZeroGPU Notification Info]: {exc}")
+
+
+_notify_zerogpu_startup()
+
 from fastapi import Depends, FastAPI, Header, HTTPException
 import gradio as gr
 from playwright.async_api import Browser, BrowserContext, async_playwright
@@ -86,6 +106,7 @@ async def init_browser_async():
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Launch headless Chromium asynchronously on startup."""
+    _notify_zerogpu_startup()
     asyncio.create_task(init_browser_async())
     yield
     global _playwright_instance, _shared_browser
