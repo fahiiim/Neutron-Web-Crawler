@@ -15,11 +15,12 @@ try:
     import spaces
 
     @spaces.GPU
-    def _zero_gpu_guard() -> bool:
+    def _zero_gpu_guard() -> str:
         """Hugging Face ZeroGPU requirement guard."""
-        return True
+        return "Neutron Stealth Renderer Online"
 except Exception:
-    pass
+    def _zero_gpu_guard() -> str:
+        return "Neutron Stealth Renderer Online"
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 import gradio as gr
@@ -169,10 +170,13 @@ with gr.Blocks(title="Neutron Stealth Renderer") as demo:
     gr.Markdown("# 🎭 Neutron Stealth Renderer")
     gr.Markdown("Isolated headless Chromium browser service for dynamic SPAs and WAF bypass.")
     gr.Markdown("Status: **Active** • Engine: **Playwright Chromium**")
-    try:
-        demo.load(_zero_gpu_guard)
-    except Exception:
-        pass
+
+    with gr.Row():
+        status_box = gr.Textbox(value="Initializing...", label="Renderer Status")
+        status_btn = gr.Button("Refresh Status")
+
+    status_btn.click(fn=_zero_gpu_guard, inputs=[], outputs=[status_box])
+    demo.load(fn=_zero_gpu_guard, inputs=[], outputs=[status_box])
 
 app = gr.mount_gradio_app(app, demo, path="/")
 

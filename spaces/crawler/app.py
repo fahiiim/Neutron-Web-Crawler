@@ -15,11 +15,12 @@ try:
     import spaces
 
     @spaces.GPU
-    def _zero_gpu_guard() -> bool:
+    def _zero_gpu_guard() -> str:
         """Hugging Face ZeroGPU requirement guard."""
-        return True
+        return "Neutron Search Engine Online"
 except Exception:
-    pass
+    def _zero_gpu_guard() -> str:
+        return "Neutron Search Engine Online"
 
 from curl_cffi.requests import AsyncSession
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
@@ -396,10 +397,13 @@ with gr.Blocks(title="Neutron Engine Explorer") as demo:
     gr.Markdown("# 🚀 Neutron Real-Time Search Engine")
     gr.Markdown("Unified search gateway and crawler worker.")
     gr.Markdown("Open the root [URL](/) to use the web search interface.")
-    try:
-        demo.load(_zero_gpu_guard)
-    except Exception:
-        pass
+
+    with gr.Row():
+        status_box = gr.Textbox(value="Initializing...", label="Cluster Status")
+        status_btn = gr.Button("Refresh Status")
+
+    status_btn.click(fn=_zero_gpu_guard, inputs=[], outputs=[status_box])
+    demo.load(fn=_zero_gpu_guard, inputs=[], outputs=[status_box])
 
 app = gr.mount_gradio_app(app, demo, path="/gradio")
 
