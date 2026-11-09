@@ -1,22 +1,27 @@
-"""Crawler Worker Microservice (FastAPI + Gradio SDK).
+"""Neutron Unified Search Gateway & Crawler Worker (FastAPI + Gradio).
 
-Runs on Hugging Face Spaces free tier (16 GB RAM).
-Executes live Just-In-Time (JIT) crawl bursts for the search gateway,
-and runs a polite background crawler frontier maintaining ~27,400 pages/day.
+Combines the public search engine UI, API coordinator, real-time JIT crawler,
+and background politeness crawler into a single high-performance microservice.
 """
 
 import asyncio
 from contextlib import asynccontextmanager
+import json
+import os
 import time
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional, Set
 
 from curl_cffi.requests import AsyncSession
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
 import gradio as gr
 import httpx
 from pydantic import BaseModel
+from sse_starlette.sse import EventSourceResponse
 
-from compression import compress_text
+from compression import compress_text, decompress_text
 from config import settings
 from db_turso import turso_crawler_client
 from dedup import (
@@ -28,6 +33,8 @@ from dedup import (
 from discovery import discover_seed_urls
 from parser import parse_page_content
 from robots import robots_manager
+
+templates = Jinja2Templates(directory="templates")
 
 
 class JITCrawlRequest(BaseModel):
@@ -57,28 +64,45 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     global _bg_worker_task
     try:
         await turso_crawler_client.connect()
-        print("[Crawler Worker] Connected to Turso DB.")
+        print("[Neutron] Connected to Turso DB successfully.")
     except Exception as exc:
-        print(f"[Crawler Worker Startup Warning]: {exc}")
+        print(f"[Neutron Startup Warning]: {exc}")
 
     if settings.BACKGROUND_CRAWLER_ENABLED:
         _bg_worker_task = asyncio.create_task(background_politeness_worker())
-        print("[Crawler Worker] Background politeness crawler started.")
+        print("[Neutron] Background politeness crawler started.")
 
     yield
 
     if _bg_worker_task and not _bg_worker_task.done():
         _bg_worker_task.cancel()
     await turso_crawler_client.close()
-    print("[Crawler Worker] Shut down cleanly.")
+    print("[Neutron] Shut down cleanly.")
 
 
 app = FastAPI(
-    title="Neutron Crawler Worker",
-    description="Dual-lane async crawler: JIT user bursts + background politeness loop.",
+    title="Neutron Search Engine & Crawler",
+    description="Unified search gateway, real-time JIT crawler, and background frontier worker.",
     version="2.0.0",
     lifespan=lifespan,
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# --------------------------------------------------------------------------
+# 1. SEARCH ENGINE FRONTEND & PUBLIC APIS
+# --------------------------------------------------------------------------
+@app.get("/", response_class=HTMLResponse)
+async def serve_home(request: Request) -> Any:
+    """Serve the interactive web search engine frontend."""
+    return templates.TemplateResponse("index.html", {"request": request})
 
 
 @app.get("/health")
@@ -87,11 +111,131 @@ async def health_check() -> Dict[str, Any]:
     is_worker_alive = _bg_worker_task is not None and not _bg_worker_task.done()
     return {
         "status": "ok",
-        "service": "neutron-crawler",
+        "service": "neutron-crawler-gateway",
         "background_crawler_running": is_worker_alive,
     }
 
 
+@app.get("/search")
+async def search_endpoint(
+    q: str = Query(..., description="Search query string"),
+    limit: int = Query(15, ge=1, le=50),
+) -> Dict[str, Any]:
+    """Execute unified search: Turso FTS5 BM25 index + in-process JIT crawl cascade."""
+    clean_query = q.strip()
+    if not clean_query:
+        return {"query": q, "total": 0, "results": []}
+
+    asyncio.create_task(turso_crawler_client.record_hot_topic(clean_query))
+
+    # 1. Query Turso FTS5 Index (<15ms)
+    cached_hits = await turso_crawler_client.search(clean_query, limit=limit)
+
+    # 2. Return immediately if we have enough indexed matches
+    if len(cached_hits) >= 5:
+        return {
+            "query": clean_query,
+            "source": "index_cache",
+            "total": len(cached_hits),
+            "results": cached_hits,
+        }
+
+    # 3. Cache sparse or miss: trigger in-process live JIT crawl directly!
+    candidates = await discover_seed_urls(clean_query, max_urls=8)
+    jit_hits: List[Dict[str, Any]] = []
+
+    if candidates:
+        async with AsyncSession(impersonate="chrome124") as session:
+            tasks = [fetch_and_index_document(session, url) for url in candidates]
+            outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+            for item in outcomes:
+                if isinstance(item, dict) and item:
+                    jit_hits.append(item)
+
+    # Merge and deduplicate results
+    seen_urls: Set[str] = set()
+    merged: List[Dict[str, Any]] = []
+    for hit in cached_hits + jit_hits:
+        url = hit.get("url")
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            merged.append(hit)
+
+    return {
+        "query": clean_query,
+        "source": "hybrid_jit",
+        "total": len(merged),
+        "results": merged[:limit],
+    }
+
+
+@app.get("/search/stream")
+async def search_stream(q: str = Query(..., description="Search query")) -> Any:
+    """Stream search results in real time using Server-Sent Events (SSE)."""
+    clean_query = q.strip()
+
+    async def event_generator() -> AsyncGenerator[Dict[str, str], None]:
+        # 1. Yield indexed hits first (<15ms)
+        cached_hits = await turso_crawler_client.search(clean_query, limit=10)
+        yield {
+            "event": "cached_results",
+            "data": json.dumps({"count": len(cached_hits), "results": cached_hits}),
+        }
+
+        # 2. Trigger live JIT crawl if cached hits are sparse
+        if len(cached_hits) < 5:
+            yield {
+                "event": "status",
+                "data": json.dumps(
+                    {"message": "Triggering live JIT crawl across discovery seeds..."}
+                ),
+            }
+
+            candidates = await discover_seed_urls(clean_query, max_urls=8)
+            if candidates:
+                async with AsyncSession(impersonate="chrome124") as session:
+                    for url in candidates:
+                        try:
+                            doc = await fetch_and_index_document(session, url)
+                            if doc:
+                                yield {"event": "live_result", "data": json.dumps(doc)}
+                        except Exception as exc:
+                            print(f"[Stream JIT Error]: {exc}")
+
+        # 3. Final completion event
+        yield {"event": "done", "data": json.dumps({"completed": True})}
+
+    return EventSourceResponse(event_generator())
+
+
+@app.get("/doc/{url_hash}")
+async def get_document(url_hash: int) -> Dict[str, Any]:
+    """Retrieve full extracted markdown article directly from Turso (Sub-5ms, Zero Card)."""
+    payload_bytes = await turso_crawler_client.get_document_payload(url_hash)
+    if payload_bytes:
+        full_markdown = decompress_text(payload_bytes)
+        return {
+            "url_hash": url_hash,
+            "full_markdown": full_markdown,
+            "source": "turso_blob",
+        }
+
+    hits = await turso_crawler_client.search(str(url_hash), limit=1)
+    if not hits:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    meta = hits[0]
+    return {
+        "url": meta.get("url"),
+        "title": meta.get("title"),
+        "full_markdown": meta.get("snippet", ""),
+        "source": "snippet_fallback",
+    }
+
+
+# --------------------------------------------------------------------------
+# 2. CRAWLER CORE ENGINE
+# --------------------------------------------------------------------------
 async def fetch_and_index_document(
     session: AsyncSession,
     url: str,
@@ -228,13 +372,13 @@ async def background_politeness_worker() -> None:
                 await asyncio.sleep(5.0)
 
 
-# Gradio monitor interface
-with gr.Blocks(title="Neutron Crawler Worker") as demo:
-    gr.Markdown("# 🕷️ Neutron Crawler Worker")
-    gr.Markdown("Active dual-mode JIT fetcher and politeness background crawler worker.")
-    gr.Markdown("Status: **Active** • Engine: **Turso BLOB + LibSQL FTS5 (100% Free, No Card)**")
+# Gradio monitor interface mounted on /gradio
+with gr.Blocks(title="Neutron Engine Explorer") as demo:
+    gr.Markdown("# 🚀 Neutron Real-Time Search Engine")
+    gr.Markdown("Unified search gateway and crawler worker.")
+    gr.Markdown("Open the root [URL](/) to use the web search interface.")
 
-app = gr.mount_gradio_app(app, demo, path="/")
+app = gr.mount_gradio_app(app, demo, path="/gradio")
 
 if __name__ == "__main__":
     import uvicorn

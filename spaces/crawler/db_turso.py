@@ -1,4 +1,4 @@
-"""Database client for managing index insertions and frontier queues in Turso."""
+"""Database client for managing index insertions, frontier queues, and search in Turso."""
 
 from typing import Any, Dict, List, Optional
 import libsql_client
@@ -7,7 +7,7 @@ from config import settings
 
 
 class TursoCrawlerClient:
-    """Manages asynchronous database writes and queue leases on Turso LibSQL."""
+    """Manages asynchronous database queries, writes, and queue leases on Turso LibSQL."""
 
     def __init__(self) -> None:
         self._client: Optional[libsql_client.Client] = None
@@ -26,6 +26,94 @@ class TursoCrawlerClient:
             await self._client.close()
             self._client = None
 
+    async def search(self, query: str, limit: int = 15) -> List[Dict[str, Any]]:
+        """Execute high-speed BM25 ranked full-text query against SQLite FTS5 index."""
+        if self._client is None:
+            await self.connect()
+
+        clean_terms = [
+            token.strip()
+            for token in "".join(c for c in query if c.isalnum() or c.isspace()).split()
+            if len(token.strip()) > 1
+        ][:8]
+
+        if not clean_terms:
+            return []
+
+        fts_pattern = " ".join([f'"{term}"*' for term in clean_terms])
+
+        sql = """
+        SELECT
+            s.url_hash,
+            s.domain_hash,
+            s.canonical_url,
+            s.title,
+            s.snippet,
+            s.opic_authority,
+            bm25(search_fts, 2.0, 1.0, 0.5) AS bm25_rank
+        FROM search_fts f
+        JOIN search_index s ON f.rowid = s.url_hash
+        WHERE search_fts MATCH ?
+        ORDER BY bm25_rank ASC, s.opic_authority DESC
+        LIMIT ?;
+        """
+
+        try:
+            result_set = await self._client.execute(sql, [fts_pattern, limit])
+            results: List[Dict[str, Any]] = []
+
+            for row in result_set.rows:
+                rank_score = round(
+                    abs(float(row["bm25_rank"] or 0.0))
+                    + float(row["opic_authority"] or 0.1),
+                    4,
+                )
+                results.append(
+                    {
+                        "url_hash": row["url_hash"],
+                        "url": row["canonical_url"],
+                        "title": row["title"],
+                        "snippet": row["snippet"],
+                        "score": rank_score,
+                    }
+                )
+            return results
+        except Exception as exc:
+            print(f"[Turso Search Warning]: {exc}")
+            return []
+
+    async def get_document_payload(self, url_hash: int) -> Optional[bytes]:
+        """Fetch compressed markdown payload directly from Turso (Sub-5ms, Zero-Card)."""
+        if self._client is None:
+            await self.connect()
+
+        sql = "SELECT compressed_text FROM page_payloads WHERE url_hash = ? LIMIT 1;"
+        try:
+            rs = await self._client.execute(sql, [url_hash])
+            if rs.rows:
+                raw_bytes = rs.rows[0]["compressed_text"]
+                return bytes(raw_bytes) if raw_bytes else None
+        except Exception as exc:
+            print(f"[Turso Payload Retrieval Warning]: {exc}")
+        return None
+
+    async def record_hot_topic(self, term: str) -> None:
+        """Increment frequency in the hot_topics lexicon for focused crawling."""
+        if self._client is None:
+            await self.connect()
+
+        sql = """
+        INSERT INTO hot_topics (term, frequency, last_searched_at)
+        VALUES (?, 1, DATETIME('now'))
+        ON CONFLICT(term) DO UPDATE SET
+            frequency = frequency + 1,
+            last_searched_at = DATETIME('now');
+        """
+        try:
+            await self._client.execute(sql, [term.lower().strip()[:64]])
+        except Exception:
+            pass
+
     async def insert_search_index(
         self,
         url_hash: int,
@@ -37,21 +125,7 @@ class TursoCrawlerClient:
         simhash: int,
         compressed_text: Optional[bytes] = None,
     ) -> bool:
-        """Insert or update indexed page metadata and payload directly in Turso.
-
-        Args:
-            url_hash: Signed 64-bit primary key.
-            domain_hash: Signed 64-bit domain key.
-            canonical_url: Clean URL string.
-            title: Document title.
-            snippet: Short search result summary.
-            opic_authority: Authority score (0.0 to 1.0).
-            simhash: 64-bit Charikar SimHash.
-            compressed_text: Optional Zstandard-compressed full markdown payload.
-
-        Returns:
-            True if write succeeded.
-        """
+        """Insert or update indexed page metadata and payload directly in Turso."""
         if self._client is None:
             await self.connect()
 
@@ -79,7 +153,6 @@ class TursoCrawlerClient:
                 ],
             )
 
-            # Store compressed text payload directly in Turso (eliminating Cloudflare R2!)
             if compressed_text:
                 sql_payload = """
                 INSERT INTO page_payloads (url_hash, compressed_text)

@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neutron Search Engine</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #0b0f19; color: #f3f4f6; }
+        .glow { box-shadow: 0 0 35px -5px rgba(59, 130, 246, 0.25); }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between">
+    <!-- Header -->
+    <header class="border-b border-gray-800/80 px-6 py-4 flex items-center justify-between backdrop-blur-md sticky top-0 z-50 bg-[#0b0f19]/80">
+        <div class="flex items-center space-x-3">
+            <span class="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-lg text-white shadow-lg shadow-blue-500/30">N</span>
+            <span class="font-bold text-xl tracking-tight text-white">Neutron <span class="text-xs font-semibold px-2 py-0.5 rounded bg-blue-900/60 text-blue-400 border border-blue-800 ml-1">JIT Real-Time</span></span>
+        </div>
+        <div class="flex items-center space-x-4 text-xs text-gray-400">
+            <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-emerald-400 mr-2 animate-pulse"></span> Turso LibSQL FTS5: Ready</span>
+            <span class="flex items-center"><span class="w-2 h-2 rounded-full bg-blue-400 mr-2"></span> 100% Free Zero-Card Architecture</span>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="flex-1 max-w-4xl w-full mx-auto px-4 py-8">
+        <!-- Search Bar Hero -->
+        <div class="mb-8">
+            <form id="search-form" class="relative group">
+                <input 
+                    type="text" 
+                    id="search-input" 
+                    placeholder="Search anything (e.g., 'Zig async IO benchmarks', 'Rust web framework comparison')..." 
+                    class="w-full bg-[#131b2e] border border-gray-700/80 rounded-2xl px-6 py-4 pl-14 text-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 glow transition-all"
+                    autofocus
+                    autocomplete="off"
+                >
+                <div class="absolute left-5 top-5 text-gray-400">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                </div>
+                <button type="submit" class="absolute right-3.5 top-3 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl text-sm transition-all shadow-md shadow-blue-600/30">
+                    Search
+                </button>
+            </form>
+        </div>
+
+        <!-- Live Status Bar -->
+        <div id="status-bar" class="hidden mb-6 flex items-center justify-between text-xs text-gray-400 bg-gray-900/40 border border-gray-800/80 px-4 py-2.5 rounded-xl">
+            <div id="status-text" class="flex items-center">
+                <span class="w-2 h-2 rounded-full bg-blue-500 mr-2 animate-ping"></span>
+                <span>Searching index...</span>
+            </div>
+            <div id="latency-stats" class="font-mono text-gray-500"></div>
+        </div>
+
+        <!-- Results Stream -->
+        <div id="results-container" class="space-y-4"></div>
+    </main>
+
+    <!-- Full Document Modal -->
+    <div id="doc-modal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-[#111827] border border-gray-700 w-full max-w-3xl rounded-2xl max-h-[85vh] flex flex-col overflow-hidden shadow-2xl">
+            <div class="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
+                <h3 id="modal-title" class="font-semibold text-lg text-white truncate max-w-xl">Document Reader</h3>
+                <button onclick="closeModal()" class="text-gray-400 hover:text-white text-xl font-bold">&times;</button>
+            </div>
+            <div id="modal-body" class="p-6 overflow-y-auto text-sm text-gray-300 leading-relaxed font-sans whitespace-pre-wrap"></div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="border-t border-gray-800/60 py-4 text-center text-xs text-gray-500">
+        Neutron Search Engine &bull; Hugging Face Spaces &bull; Turso LibSQL FTS5 &bull; 100% Free
+    </footer>
+
+    <script>
+        const form = document.getElementById('search-form');
+        const input = document.getElementById('search-input');
+        const resultsContainer = document.getElementById('results-container');
+        const statusBar = document.getElementById('status-bar');
+        const statusText = document.getElementById('status-text');
+        const latencyStats = document.getElementById('latency-stats');
+        const modal = document.getElementById('doc-modal');
+
+        let eventSource = null;
+
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const query = input.value.trim();
+            if (!query) return;
+
+            if (eventSource) {
+                eventSource.close();
+            }
+
+            resultsContainer.innerHTML = '';
+            statusBar.classList.remove('hidden');
+            statusText.innerHTML = '<span class="w-2 h-2 rounded-full bg-blue-500 mr-2 animate-ping"></span><span>Checking Turso FTS5 Index...</span>';
+            const startTime = performance.now();
+
+            eventSource = new EventSource(`/search/stream?q=${encodeURIComponent(query)}`);
+
+            eventSource.addEventListener('cached_results', (event) => {
+                const data = JSON.parse(event.data);
+                const elapsed = Math.round(performance.now() - startTime);
+                if (data.results && data.results.length > 0) {
+                    latencyStats.textContent = `Indexed Hits: ${data.results.length} (${elapsed}ms)`;
+                    data.results.forEach(renderResultCard);
+                }
+            });
+
+            eventSource.addEventListener('status', (event) => {
+                const data = JSON.parse(event.data);
+                statusText.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-400 mr-2 animate-pulse"></span><span>${data.message}</span>`;
+            });
+
+            eventSource.addEventListener('live_result', (event) => {
+                const item = JSON.parse(event.data);
+                renderResultCard(item, true);
+            });
+
+            eventSource.addEventListener('done', () => {
+                const totalElapsed = Math.round(performance.now() - startTime);
+                statusText.innerHTML = `<span class="text-emerald-400 font-medium">&check; Search Complete</span>`;
+                latencyStats.textContent = `Completed in ${totalElapsed}ms`;
+                eventSource.close();
+            });
+
+            eventSource.onerror = () => {
+                eventSource.close();
+            };
+        });
+
+        function renderResultCard(item, isLive = false) {
+            let domain = "web";
+            try { domain = new URL(item.url).hostname; } catch(e) {}
+
+            const card = document.createElement('div');
+            card.className = "bg-[#131b2e] border border-gray-800 hover:border-gray-700 p-5 rounded-xl transition-all shadow-sm";
+            card.innerHTML = `
+                <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-xs font-mono text-blue-400 flex items-center">
+                        ${isLive ? '<span class="bg-amber-500/20 text-amber-300 text-[10px] font-bold px-1.5 py-0.5 rounded mr-2 border border-amber-500/30">LIVE JIT</span>' : ''}
+                        ${domain}
+                    </span>
+                    <span class="text-[11px] text-gray-500">Score: ${item.score || '1.0'}</span>
+                </div>
+                <h2 class="text-base font-semibold text-white hover:text-blue-400 transition-colors mb-2">
+                    <a href="${item.url}" target="_blank" rel="noopener noreferrer">${item.title || item.url}</a>
+                </h2>
+                <p class="text-xs text-gray-400 line-clamp-3 leading-relaxed mb-3">${item.snippet || 'No preview available.'}</p>
+                <div class="flex items-center space-x-3 text-xs">
+                    <button onclick="readFullDoc(${item.url_hash})" class="text-blue-400 hover:text-blue-300 font-medium">Read Article (Turso)</button>
+                    <span class="text-gray-600">&bull;</span>
+                    <a href="${item.url}" target="_blank" class="text-gray-400 hover:text-gray-300">Visit Original &nearr;</a>
+                </div>
+            `;
+            resultsContainer.appendChild(card);
+        }
+
+        async function readFullDoc(urlHash) {
+            if (!urlHash) return;
+            modal.classList.remove('hidden');
+            document.getElementById('modal-title').textContent = "Loading from Turso Database...";
+            document.getElementById('modal-body').textContent = "Fetching compressed payload (<5ms)...";
+
+            try {
+                const res = await fetch(`/doc/${urlHash}`);
+                if (!res.ok) throw new Error("Could not retrieve document");
+                const data = await res.json();
+                document.getElementById('modal-title').textContent = data.title || "Document";
+                document.getElementById('modal-body').textContent = data.full_markdown || data.snippet || "No text available.";
+            } catch (err) {
+                document.getElementById('modal-body').textContent = "Error: " + err.message;
+            }
+        }
+
+        function closeModal() {
+            modal.classList.add('hidden');
+        }
+    </script>
+</body>
+</html>
