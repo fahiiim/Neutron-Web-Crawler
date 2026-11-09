@@ -234,10 +234,17 @@ async def search_stream(q: str = Query(..., description="Search query")) -> Any:
 
             candidates = await discover_seed_urls(clean_query, max_urls=8)
             if candidates:
+                yield {
+                    "event": "status",
+                    "data": json.dumps(
+                        {"message": f"Crawling {len(candidates)} live web sources in parallel..."}
+                    ),
+                }
                 async with AsyncSession(impersonate="chrome124") as session:
-                    for url in candidates:
+                    tasks = [fetch_and_index_document(session, url) for url in candidates]
+                    for coro in asyncio.as_completed(tasks):
                         try:
-                            doc = await fetch_and_index_document(session, url)
+                            doc = await coro
                             if doc:
                                 yield {"event": "live_result", "data": json.dumps(doc)}
                         except Exception as exc:

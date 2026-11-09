@@ -6,6 +6,23 @@ import libsql_client
 from config import settings
 
 
+STOP_WORDS = {
+    "a", "about", "above", "after", "again", "against", "all", "am", "an", "and",
+    "any", "are", "as", "at", "be", "because", "been", "before", "being",
+    "below", "between", "both", "but", "by", "could", "did", "do", "does",
+    "doing", "down", "during", "each", "few", "for", "from", "further", "had",
+    "has", "have", "having", "he", "her", "here", "hers", "herself", "him",
+    "himself", "his", "how", "i", "if", "in", "into", "is", "it", "its", "itself",
+    "me", "more", "most", "my", "myself", "no", "nor", "not", "of", "off", "on",
+    "once", "only", "or", "other", "our", "ours", "ourselves", "out", "over", "own",
+    "same", "she", "should", "so", "some", "such", "than", "that", "the", "their",
+    "theirs", "them", "themselves", "then", "there", "these", "they", "this",
+    "those", "through", "to", "too", "under", "until", "up", "very", "was", "we",
+    "were", "what", "when", "where", "which", "while", "who", "whom", "why",
+    "with", "would", "you", "your", "yours", "yourself", "yourselves"
+}
+
+
 class TursoCrawlerClient:
     """Manages asynchronous database queries, writes, and queue leases on Turso LibSQL."""
 
@@ -31,22 +48,8 @@ class TursoCrawlerClient:
             await self._client.close()
             self._client = None
 
-    async def search(self, query: str, limit: int = 15) -> List[Dict[str, Any]]:
-        """Execute high-speed BM25 ranked full-text query against SQLite FTS5 index."""
-        if self._client is None:
-            await self.connect()
-
-        clean_terms = [
-            token.strip()
-            for token in "".join(c for c in query if c.isalnum() or c.isspace()).split()
-            if len(token.strip()) > 1
-        ][:8]
-
-        if not clean_terms:
-            return []
-
-        fts_pattern = " ".join([f'"{term}"*' for term in clean_terms])
-
+    async def _execute_fts(self, fts_pattern: str, limit: int) -> List[Dict[str, Any]]:
+        """Run an FTS5 MATCH query with BM25 ranking."""
         sql = """
         SELECT
             s.url_hash,
@@ -62,11 +65,9 @@ class TursoCrawlerClient:
         ORDER BY bm25_rank ASC, s.opic_authority DESC
         LIMIT ?;
         """
-
         try:
             result_set = await self._client.execute(sql, [fts_pattern, limit])
             results: List[Dict[str, Any]] = []
-
             for row in result_set.rows:
                 rank_score = round(
                     abs(float(row["bm25_rank"] or 0.0))
@@ -86,6 +87,44 @@ class TursoCrawlerClient:
         except Exception as exc:
             print(f"[Turso Search Warning]: {exc}")
             return []
+
+    async def search(self, query: str, limit: int = 15) -> List[Dict[str, Any]]:
+        """Execute high-speed BM25 ranked full-text query against SQLite FTS5 index.
+
+        Removes stop words, applies precision AND query first, and falls back
+        to ranked OR matching for natural-language queries.
+        """
+        if self._client is None:
+            await self.connect()
+
+        raw_tokens = [
+            token.strip().lower()
+            for token in "".join(c for c in query if c.isalnum() or c.isspace()).split()
+            if len(token.strip()) > 1
+        ]
+        if not raw_tokens:
+            return []
+
+        # Filter stop words unless the entire query consists of stop words
+        filtered = [t for t in raw_tokens if t not in STOP_WORDS]
+        terms = filtered if filtered else raw_tokens
+        terms = terms[:8]
+
+        # 1. Attempt precision AND query first
+        and_pattern = " ".join([f'"{term}"*' for term in terms])
+        hits = await self._execute_fts(and_pattern, limit)
+
+        # 2. If precision query returns sparse results, fall back to ranked OR query
+        if len(hits) < 3 and len(terms) > 1:
+            or_pattern = " OR ".join([f'"{term}"*' for term in terms])
+            or_hits = await self._execute_fts(or_pattern, limit)
+            seen_hashes = {h["url_hash"] for h in hits}
+            for item in or_hits:
+                if item["url_hash"] not in seen_hashes:
+                    hits.append(item)
+                    seen_hashes.add(item["url_hash"])
+
+        return hits[:limit]
 
     async def get_document_payload(self, url_hash: int) -> Optional[bytes]:
         """Fetch compressed markdown payload directly from Turso (Sub-5ms, Zero-Card)."""

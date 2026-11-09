@@ -85,6 +85,8 @@
         const modal = document.getElementById('doc-modal');
 
         let eventSource = null;
+        let resultCount = 0;
+        const seenUrls = new Set();
 
         form.addEventListener('submit', (e) => {
             e.preventDefault();
@@ -95,6 +97,8 @@
                 eventSource.close();
             }
 
+            resultCount = 0;
+            seenUrls.clear();
             resultsContainer.innerHTML = '';
             statusBar.classList.remove('hidden');
             statusText.innerHTML = '<span class="w-2 h-2 rounded-full bg-blue-500 mr-2 animate-ping"></span><span>Checking Turso FTS5 Index...</span>';
@@ -107,7 +111,7 @@
                 const elapsed = Math.round(performance.now() - startTime);
                 if (data.results && data.results.length > 0) {
                     latencyStats.textContent = `Indexed Hits: ${data.results.length} (${elapsed}ms)`;
-                    data.results.forEach(renderResultCard);
+                    data.results.forEach(item => renderResultCard(item, false));
                 }
             });
 
@@ -123,7 +127,17 @@
 
             eventSource.addEventListener('done', () => {
                 const totalElapsed = Math.round(performance.now() - startTime);
-                statusText.innerHTML = `<span class="text-emerald-400 font-medium">&check; Search Complete</span>`;
+                if (resultCount === 0) {
+                    statusText.innerHTML = `<span class="text-gray-400 font-medium">No results found</span>`;
+                    resultsContainer.innerHTML = `
+                        <div class="bg-[#131b2e] border border-gray-800 rounded-xl p-8 text-center text-gray-400">
+                            <p class="text-base text-gray-200 font-semibold mb-2">No documents discovered yet</p>
+                            <p class="text-sm">Try querying different keywords or checking spelling.</p>
+                        </div>
+                    `;
+                } else {
+                    statusText.innerHTML = `<span class="text-emerald-400 font-medium">&check; Search Complete (${resultCount} results)</span>`;
+                }
                 latencyStats.textContent = `Completed in ${totalElapsed}ms`;
                 eventSource.close();
             });
@@ -134,6 +148,9 @@
         });
 
         function renderResultCard(item, isLive = false) {
+            if (!item.url || seenUrls.has(item.url)) return;
+            seenUrls.add(item.url);
+            resultCount++;
             let domain = "web";
             try { domain = new URL(item.url).hostname; } catch(e) {}
 
