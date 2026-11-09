@@ -65,33 +65,49 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Deploy Neutron_Renderer Space
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          HF_USERNAME: ${{ secrets.HF_USERNAME || 'fahiiim' }}
-        run: |
-          cd spaces/renderer
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git init
-          git remote add hf "https://$HF_USERNAME:$HF_TOKEN@huggingface.co/spaces/$HF_USERNAME/Neutron_Renderer"
-          git add .
-          git commit -m "ci: automated deployment from commit ${{ github.sha }}" || true
-          git branch -M main
-          git push hf main --force
+      - name: Set up Python for Deployment
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-      - name: Deploy Neutron_Crawler Space (Unified Gateway + Crawler)
+      - name: Install Deployment Dependencies
+        run: pip install "huggingface_hub<1.0.0"
+
+      - name: Deploy Microservices via Hugging Face Hub API
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_USERNAME: ${{ secrets.HF_USERNAME || 'fahiiim' }}
+          COMMIT_SHA: ${{ github.sha }}
         run: |
-          cd spaces/crawler
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git init
-          git remote add hf "https://$HF_USERNAME:$HF_TOKEN@huggingface.co/spaces/$HF_USERNAME/Neutron_Crawler"
-          git add .
-          git commit -m "ci: automated deployment from commit ${{ github.sha }}" || true
-          git branch -M main
-          git push hf main --force
+          python -c "
+          import os
+          from huggingface_hub import HfApi
+
+          token = os.environ.get('HF_TOKEN')
+          if not token:
+              raise ValueError('Missing HF_TOKEN repository secret')
+
+          username = os.environ.get('HF_USERNAME', 'fahiiim')
+          sha = os.environ.get('COMMIT_SHA', 'latest')[:7]
+          api = HfApi(token=token)
+
+          print(f'Deploying Stealth Renderer to {username}/Neutron_Renderer...')
+          api.upload_folder(
+              folder_path='spaces/renderer',
+              repo_id=f'{username}/Neutron_Renderer',
+              repo_type='space',
+              delete_patterns=['*.pyc', '__pycache__/*', '.git/*'],
+              commit_message=f'ci: automated deployment from commit {sha}'
+          )
+
+          print(f'Deploying Unified Crawler to {username}/Neutron_Crawler...')
+          api.upload_folder(
+              folder_path='spaces/crawler',
+              repo_id=f'{username}/Neutron_Crawler',
+              repo_type='space',
+              delete_patterns=['*.pyc', '__pycache__/*', '.git/*'],
+              commit_message=f'ci: automated deployment from commit {sha}'
+          )
+          print('All Hugging Face microservices synced successfully.')
+          "
 
