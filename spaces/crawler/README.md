@@ -16,3 +16,4 @@ Dual-mode async web crawler and parser:
 - **Extraction**: Zero-Browser Next.js/Nuxt SSR JSON extraction + Selectolax HTML parser.
 - **Port**: `7860`
 - **RAM**: 16 GB (Free HF Space)
+
