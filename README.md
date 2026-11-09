@@ -1,43 +1,39 @@
-# Neutron Web Crawler & Real-Time Search Engine
+# Neutron: 10M-Page Real-Time Web Search Engine
 
-A cloud-native, microservice-based real-time search engine with just-in-time (JIT) crawl discovery, focused background indexing (10M pages/year), and zero-cost cloud infrastructure.
+A cloud-native, microservice search engine powered by **FastAPI**, **Turso (LibSQL FTS5)**, and **Cloudflare R2**, deployed across **3 independent Hugging Face Spaces (48 GB total RAM, $0/month)**.
 
 ---
 
-## Architecture Overview
+## Architecture Topology
 
 ```
-                                [ External Search Traffic ]
-                                             │
-                                             ▼
-                             ┌───────────────────────────────┐
-                             │   Kubernetes Ingress (Nginx)  │
-                             └───────────────┬───────────────┘
-                                             │
-                                             ▼
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│ 1. svc-search-gateway (Port 8000)                                                      │
-│ • Endpoints: GET /search, GET /search/stream (SSE), GET /doc/{url_hash}, GET /health   │
-│ • Direct BM25 ranking against Turso FTS5 (<15ms)                                       │
-│ • If results < 5, dispatches live JIT crawl to svc-crawler-worker                      │
-└───────────────────────┬────────────────────────────────────────────┬───────────────────┘
-                        │ Cluster DNS (Port 8001)                    │
-                        ▼                                            ▼ Cluster DNS (Port 8002)
-┌───────────────────────────────────────────┐      ┌─────────────────────────────────────┐
-│ 2. svc-crawler-worker (Port 8001)         │      │ 3. svc-stealth-renderer (Port 8002) │
-│ • Priority Lane: JIT user burst fetches   │ SPA? │ • Single-tab isolated Chromium pool │
-│ • curl_cffi with Chrome 124 TLS JA3/JA4   ├─────►│ • Headless Chrome for WAF/Client SPAs│
-│ • Zero-Browser Next.js/Nuxt SSR extractor │      │ • Aborts images/css/fonts for memory │
-│ • Uploads full text to Cloudflare R2      │      └─────────────────────────────────────┘
-│ • Writes index to Turso LibSQL FTS5       │
-└───────────────────────┬───────────────────┘
-                        │
+                              [ User Web / API Traffic ]
+                                          │
+                                          ▼
+┌───────────────────────────────────────────────────────────────────────────────────┐
+│ SPACE 1: neutron-gateway (FastAPI) [Port 7860 • 16 GB RAM • Free HF Space]        │
+│ • Serves interactive real-time search UI at GET /                                 │
+│ • Sub-15ms BM25 ranking directly against Turso LibSQL FTS5                        │
+│ • If results < 5, streams live JIT crawl results via Server-Sent Events (SSE)     │
+│ • Fetches compressed full-text markdown articles on demand from Cloudflare R2     │
+└───────────────────────┬───────────────────────────────────────────────────────────┘
+                        │ HTTPS / Bearer Token
                         ▼
-       ┌─────────────────────────────────┐
-       │ CLOUD STORAGE LAYER             │
-       │ • Turso LibSQL (9 GB Free FTS5) │
-       │ • Cloudflare R2 (10 GB Free S3) │
-       └─────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────────────┐
+│ SPACE 2: neutron-crawler (FastAPI) [Port 7860 • 16 GB RAM • Free HF Space]        │
+│ • Priority Lane: On-demand JIT user burst fetches (<600ms via curl_cffi)          │
+│ • Background Lane: 27,400 pages/day Mercator politeness frontier loop             │
+│ • Zero-Browser Next.js / Nuxt SSR JSON extractor + Selectolax parser              │
+│ • Pushes compressed markdown chunks to R2 and writes FTS5 index to Turso          │
+└───────────────────────┬───────────────────────────────────────────────────────────┘
+                        │ HTTPS (Only if page is an empty client-side SPA)
+                        ▼
+┌───────────────────────────────────────────────────────────────────────────────────┐
+│ SPACE 3: neutron-renderer (Playwright) [Port 7860 • 16 GB RAM • Free HF Space]    │
+│ • Memory-clamped headless Chromium worker                                         │
+│ • Aborts images, media, CSS, and fonts via route.abort() for ultra-fast rendering │
+│ • Runs inside 16 GB RAM with zero fear of OOM (Out Of Memory) crashes             │
+└───────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -46,16 +42,16 @@ A cloud-native, microservice-based real-time search engine with just-in-time (JI
 
 ### A. Turso LibSQL (Search Index & Frontier)
 1. Install Turso CLI or log into [turso.tech](https://turso.tech).
-2. Create database:
+2. Create your database:
    ```bash
    turso db create neutron-search
    ```
-3. Get connection URL and authentication token:
+3. Retrieve database URL and authentication token:
    ```bash
    turso db show neutron-search --url
    turso db tokens create neutron-search
    ```
-4. Initialize the FTS5 schema:
+4. Apply the FTS5 schema:
    ```bash
    turso db shell neutron-search < migrations/03_turso_fts5_schema.sql
    ```
@@ -72,47 +68,64 @@ A cloud-native, microservice-based real-time search engine with just-in-time (JI
 
 ---
 
-## 2. Local Microservices (Docker Compose)
+## 2. Deploying to 3 Hugging Face Spaces
 
-1. Copy `.env.example` to `.env` and fill in credentials:
-   ```bash
-   cp .env.example .env
-   ```
-2. Build and launch all 3 microservices:
-   ```bash
-   docker compose up --build
-   ```
-3. Test search:
-   ```bash
-   curl "http://localhost:8000/search?q=zig+async+io"
-   ```
+Hugging Face allows unlimited public Spaces, each with **16 GB RAM and 2 vCPUs** for free.
+
+### Step 1: Create the 3 Spaces on Hugging Face
+Go to [huggingface.co/new-space](https://huggingface.co/new-space) and create 3 separate Spaces:
+
+| Space Name | Space SDK | Port | Local Directory |
+| :--- | :--- | :--- | :--- |
+| `neutron-renderer` | **Docker** | `7860` | `spaces/renderer/` |
+| `neutron-crawler` | **Docker** | `7860` | `spaces/crawler/` |
+| `neutron-gateway` | **Docker** | `7860` | `spaces/gateway/` |
+
+### Step 2: Push Each Subfolder to its Respective Space
+Each folder in `spaces/` is a self-contained Git repository with its own `Dockerfile`, `README.md`, and dependencies:
+
+```bash
+# Example: Deploying neutron-renderer
+cd spaces/renderer
+git init
+git remote add origin https://huggingface.co/spaces/<your-username>/neutron-renderer
+git add .
+git commit -m "deploy renderer"
+git push -u origin main --force
+```
+*(Repeat the same process for `spaces/crawler` and `spaces/gateway`)*
+
+### Step 3: Configure Environment Secrets in Hugging Face
+In each Space's **Settings $\rightarrow$ Variables and secrets**, add:
+
+* **For `neutron-renderer`:**
+  * `INTERNAL_API_KEY`
+* **For `neutron-crawler`:**
+  * `INTERNAL_API_KEY`
+  * `TURSO_DATABASE_URL`
+  * `TURSO_AUTH_TOKEN`
+  * `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ENDPOINT_URL`
+  * `RENDERER_SERVICE_URL` (`https://<your-username>-neutron-renderer.hf.space`)
+* **For `neutron-gateway`:**
+  * `INTERNAL_API_KEY`
+  * `TURSO_DATABASE_URL`
+  * `TURSO_AUTH_TOKEN`
+  * `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ENDPOINT_URL`
+  * `CRAWLER_SERVICE_URL` (`https://<your-username>-neutron-crawler.hf.space`)
 
 ---
 
-## 3. Kubernetes Deployment
+## 3. Local Development (Docker Compose)
 
-Apply the manifests to your cluster (Minikube, Kind, K3s, or Oracle Cloud OKE):
+You can run the entire 3-microservice topology locally before pushing to Hugging Face:
 
 ```bash
-# 1. Create namespace
-kubectl apply -f k8s/00-namespace.yaml
+# 1. Fill in credentials
+cp .env.example .env
 
-# 2. Configure secrets & configmap
-# (Update values in k8s/01-secrets.yaml and k8s/02-configmap.yaml first)
-kubectl apply -f k8s/01-secrets.yaml
-kubectl apply -f k8s/02-configmap.yaml
-
-# 3. Deploy microservices
-kubectl apply -f k8s/10-gateway.yaml
-kubectl apply -f k8s/20-crawler.yaml
-kubectl apply -f k8s/30-renderer.yaml
-
-# 4. Deploy ingress
-kubectl apply -f k8s/40-ingress.yaml
+# 2. Launch all 3 services
+docker compose up --build
 ```
 
-Check pod status:
-```bash
-kubectl get pods -n neutron
-```
-
+Access the interactive search engine at:
+👉 **`http://localhost:7860`**

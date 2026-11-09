@@ -3,13 +3,15 @@ version: "3.8"
 services:
   gateway:
     build:
-      context: .
-      dockerfile: services/gateway/Dockerfile
-    container_name: svc-search-gateway
+      context: ./spaces/gateway
+      dockerfile: Dockerfile
+    container_name: neutron-gateway
     ports:
-      - "8000:8000"
+      - "7860:7860"
     environment:
       - ENVIRONMENT=development
+      - PORT=7860
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-neutron-secret-internal-key}
       - TURSO_DATABASE_URL=${TURSO_DATABASE_URL}
       - TURSO_AUTH_TOKEN=${TURSO_AUTH_TOKEN}
       - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
@@ -17,21 +19,21 @@ services:
       - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
       - R2_BUCKET_NAME=${R2_BUCKET_NAME:-neutron-page-cache}
       - R2_ENDPOINT_URL=${R2_ENDPOINT_URL}
-      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-neutron_secret_key_32}
-      - CRAWLER_SERVICE_URL=http://crawler:8001
-      - RENDERER_SERVICE_URL=http://renderer:8002
+      - CRAWLER_SERVICE_URL=http://crawler:7860
     depends_on:
       - crawler
 
   crawler:
     build:
-      context: .
-      dockerfile: services/crawler/Dockerfile
-    container_name: svc-crawler-worker
+      context: ./spaces/crawler
+      dockerfile: Dockerfile
+    container_name: neutron-crawler
     ports:
-      - "8001:8001"
+      - "7861:7860"
     environment:
       - ENVIRONMENT=development
+      - PORT=7860
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-neutron-secret-internal-key}
       - TURSO_DATABASE_URL=${TURSO_DATABASE_URL}
       - TURSO_AUTH_TOKEN=${TURSO_AUTH_TOKEN}
       - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
@@ -39,19 +41,19 @@ services:
       - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
       - R2_BUCKET_NAME=${R2_BUCKET_NAME:-neutron-page-cache}
       - R2_ENDPOINT_URL=${R2_ENDPOINT_URL}
-      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-neutron_secret_key_32}
-      - RENDERER_SERVICE_URL=http://renderer:8002
+      - RENDERER_SERVICE_URL=http://renderer:7860
+      - BACKGROUND_CRAWLER_ENABLED=true
     depends_on:
       - renderer
 
   renderer:
     build:
-      context: .
-      dockerfile: services/renderer/Dockerfile
-    container_name: svc-stealth-renderer
+      context: ./spaces/renderer
+      dockerfile: Dockerfile
+    container_name: neutron-renderer
     ports:
-      - "8002:8002"
+      - "7862:7860"
     environment:
       - ENVIRONMENT=development
-      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-neutron_secret_key_32}
-
+      - PORT=7860
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-neutron-secret-internal-key}
