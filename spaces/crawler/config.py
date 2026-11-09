@@ -40,3 +40,4 @@ class CrawlerSettings(BaseSettings):
 
 
 settings = CrawlerSettings()
+
