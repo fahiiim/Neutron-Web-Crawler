@@ -18,3 +18,4 @@ class RendererSettings(BaseSettings):
 
 
 settings = RendererSettings()
+
