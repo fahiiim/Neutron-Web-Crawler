@@ -11,6 +11,16 @@ import subprocess
 import sys
 from typing import Any, AsyncGenerator, Dict, Optional
 
+try:
+    import spaces
+
+    @spaces.GPU
+    def _zero_gpu_guard() -> bool:
+        """Hugging Face ZeroGPU requirement guard."""
+        return True
+except Exception:
+    pass
+
 from fastapi import Depends, FastAPI, Header, HTTPException
 import gradio as gr
 from playwright.async_api import Browser, BrowserContext, async_playwright

@@ -11,6 +11,16 @@ import os
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, Set
 
+try:
+    import spaces
+
+    @spaces.GPU
+    def _zero_gpu_guard() -> bool:
+        """Hugging Face ZeroGPU requirement guard."""
+        return True
+except Exception:
+    pass
+
 from curl_cffi.requests import AsyncSession
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
