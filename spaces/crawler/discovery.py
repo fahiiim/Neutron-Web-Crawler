@@ -74,3 +74,4 @@ async def discover_seed_urls(query: str, max_urls: int = 12) -> List[str]:
             break
 
     return diverse_urls
+
