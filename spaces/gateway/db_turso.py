@@ -117,3 +117,4 @@ class TursoSearchClient:
 
 
 turso_client = TursoSearchClient()
+
