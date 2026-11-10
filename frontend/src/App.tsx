@@ -1,9 +1,8 @@
-import { ShieldCheck } from 'lucide-react';
+import { Globe, Lock, ShieldCheck, Zap } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CrawlProgressDrawer } from './components/CrawlProgressDrawer';
 import { DocumentModal } from './components/DocumentModal';
 import { Header } from './components/Header';
-import { NeutronStarCanvas } from './components/NeutronStarCanvas';
 import { ResultCard } from './components/ResultCard';
 import { SearchBar } from './components/SearchBar';
 import { StatsDrawer } from './components/StatsDrawer';
@@ -26,7 +25,6 @@ export function App() {
   const [isSearching, setIsSearching] = useState(false);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
-  const [pulseSignal, setPulseSignal] = useState(0);
 
   const [trendingChips, setTrendingChips] = useState<string[]>(CURATED_TOPICS);
   const [recentSearches, setRecentSearches] = useState<string[]>(() => {
@@ -67,7 +65,7 @@ export function App() {
           }
         }
       } catch {
-        // fallback curated topics
+        // keep curated chips
       }
     })();
   }, []);
@@ -101,7 +99,6 @@ export function App() {
       setIndexStatus(null);
       setDiscoveryMetrics([]);
       setCrawlItems([]);
-      setPulseSignal((p) => p + 1);
 
       const t0 = performance.now();
       const seen = new Set<string>();
@@ -287,8 +284,11 @@ export function App() {
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col justify-between relative">
-      {/* 3D WebGL Spinning Neutron Star + Swirling Particle Ribbons */}
-      <NeutronStarCanvas dimmed={hasSearched} pulseSignal={pulseSignal} />
+      {/* Static subtle spotlight & dot grid (no animations) */}
+      <div
+        aria-hidden="true"
+        className="hero-backdrop fixed inset-x-0 top-0 h-[520px] pointer-events-none z-0"
+      />
 
       <div className="relative z-10 flex flex-col min-h-screen">
         <Header
@@ -298,20 +298,21 @@ export function App() {
         />
 
         {!hasSearched ? (
-          <main className="flex-1 flex flex-col items-center justify-center px-4 sm:px-6 pb-20 pt-8">
+          <main className="flex-1 flex flex-col items-center justify-center px-4 sm:px-6 pb-20 pt-10">
             <div className="w-full max-w-2xl text-center">
-              <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full surface-panel text-[11px] font-mono text-white mb-5">
+              <div className="inline-flex items-center space-x-2 px-3.5 py-1 rounded-full surface-panel text-[11px] font-mono text-white mb-6">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#4ade80]" />
-                <span>Turso FTS5 &middot;</span>
-                <span className="text-glow-green">Live JIT Web Crawler</span>
+                <span>DECENTRALIZED</span>
+                <span className="text-white/40">&middot;</span>
+                <span className="text-glow-green">REAL-TIME SEARCH</span>
               </div>
 
-              <h1 className="font-varsity text-3xl sm:text-5xl text-white mb-4 leading-tight">
-                SEARCH THE <span className="text-glow-green">OPEN WEB</span>
+              <h1 className="font-varsity text-4xl sm:text-6xl text-white mb-4 leading-[1.12]">
+                SEARCH THE <span className="text-glow-green">LIVE WEB</span>
               </h1>
-              <p className="font-classic text-sm sm:text-[15px] text-white/90 max-w-lg mx-auto mb-8 leading-relaxed">
-                Sub-15ms indexed retrieval with parallel live crawling, markdown
-                extraction, and zero user telemetry.
+              <p className="font-classic text-[15px] sm:text-base text-white/90 max-w-lg mx-auto mb-9 leading-relaxed">
+                Sub-15ms indexed retrieval paired with live parallel crawling, clean
+                markdown reading, and zero telemetry.
               </p>
 
               <SearchBar
@@ -327,6 +328,7 @@ export function App() {
                 inputRef={inputRef}
               />
 
+              {/* Prompt Chips */}
               <div className="mt-5 flex items-center justify-center flex-wrap gap-2 font-classic">
                 {trendingChips.map((chip) => (
                   <button
@@ -338,6 +340,22 @@ export function App() {
                     {chip}
                   </button>
                 ))}
+              </div>
+
+              {/* Clean 3-pillar trust strip */}
+              <div className="mt-10 pt-6 border-t border-white/[0.08] flex flex-wrap items-center justify-center gap-x-7 gap-y-2 text-xs font-classic text-white/90">
+                <span className="inline-flex items-center space-x-1.5">
+                  <Zap className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Sub-15ms FTS5</span>
+                </span>
+                <span className="inline-flex items-center space-x-1.5">
+                  <Globe className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>6 Live Discovery Sources</span>
+                </span>
+                <span className="inline-flex items-center space-x-1.5">
+                  <Lock className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Zero Tracking</span>
+                </span>
               </div>
             </div>
           </main>
@@ -384,7 +402,7 @@ export function App() {
                 {[1, 2, 3].map((k) => (
                   <div
                     key={k}
-                    className="surface-panel rounded-xl p-5 space-y-2.5 animate-pulse"
+                    className="surface-panel rounded-xl p-5 space-y-2.5"
                   >
                     <div className="h-3 w-36 bg-white/10 rounded" />
                     <div className="h-4 w-3/4 bg-white/15 rounded" />
@@ -426,7 +444,7 @@ export function App() {
           </main>
         )}
 
-        <footer className="border-t border-white/[0.1] bg-black/75 backdrop-blur-md py-4 px-4 sm:px-6 text-xs text-white font-classic">
+        <footer className="border-t border-white/[0.1] bg-black py-4 px-4 sm:px-6 text-xs text-white font-classic">
           <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
             <div className="inline-flex items-center space-x-2">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />

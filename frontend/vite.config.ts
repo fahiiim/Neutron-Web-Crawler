@@ -13,7 +13,6 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          three: ['three'],
           markdown: ['marked', 'dompurify', 'highlight.js'],
         },
       },
