@@ -18,8 +18,8 @@ CREATE TABLE IF NOT EXISTS domains (
     updated_at TEXT NOT NULL DEFAULT (DATETIME('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_domains_politeness 
-ON domains (next_fetch_at ASC) 
+CREATE INDEX IF NOT EXISTS idx_domains_politeness
+ON domains (next_fetch_at ASC)
 WHERE is_blacklisted = 0;
 
 -- 2. Frontier Queue Table
@@ -35,9 +35,13 @@ CREATE TABLE IF NOT EXISTS frontier_queue (
     FOREIGN KEY (domain_hash) REFERENCES domains(domain_hash) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_frontier_priority 
+CREATE INDEX IF NOT EXISTS idx_frontier_priority
 ON frontier_queue (status, priority_score DESC, discovered_at ASC)
 WHERE status = 0;
+
+CREATE INDEX IF NOT EXISTS idx_frontier_lease
+ON frontier_queue (status, lease_expires_at)
+WHERE status = 1;
 
 -- 3. Document Search Metadata Table
 CREATE TABLE IF NOT EXISTS search_index (
@@ -48,13 +52,14 @@ CREATE TABLE IF NOT EXISTS search_index (
     snippet TEXT NOT NULL,
     opic_authority REAL NOT NULL DEFAULT 0.1,
     simhash INTEGER NOT NULL,
-    crawled_at TEXT NOT NULL DEFAULT (DATE('now'))
+    crawled_at TEXT NOT NULL DEFAULT (DATETIME('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_search_domain ON search_index (domain_hash);
+CREATE INDEX IF NOT EXISTS idx_search_domain_simhash ON search_index (domain_hash, simhash);
+CREATE INDEX IF NOT EXISTS idx_search_crawled_at ON search_index (crawled_at DESC);
 
--- 4. Full-Text Compressed Payloads Table (Replaces Cloudflare R2 completely!)
--- Stores Zstd-compressed markdown directly inside Turso (9GB free, zero credit card)
+-- 4. Full-Text Compressed Payloads Table
 CREATE TABLE IF NOT EXISTS page_payloads (
     url_hash INTEGER PRIMARY KEY,
     compressed_text BLOB NOT NULL,
@@ -74,19 +79,19 @@ CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
 
 -- Triggers to keep FTS index synchronized with search_index
 CREATE TRIGGER IF NOT EXISTS search_index_ai AFTER INSERT ON search_index BEGIN
-  INSERT INTO search_fts(rowid, title, snippet, canonical_url) 
+  INSERT INTO search_fts(rowid, title, snippet, canonical_url)
   VALUES (new.url_hash, new.title, new.snippet, new.canonical_url);
 END;
 
 CREATE TRIGGER IF NOT EXISTS search_index_ad AFTER DELETE ON search_index BEGIN
-  INSERT INTO search_fts(search_fts, rowid, title, snippet, canonical_url) 
+  INSERT INTO search_fts(search_fts, rowid, title, snippet, canonical_url)
   VALUES('delete', old.url_hash, old.title, old.snippet, old.canonical_url);
 END;
 
 CREATE TRIGGER IF NOT EXISTS search_index_au AFTER UPDATE ON search_index BEGIN
-  INSERT INTO search_fts(search_fts, rowid, title, snippet, canonical_url) 
+  INSERT INTO search_fts(search_fts, rowid, title, snippet, canonical_url)
   VALUES('delete', old.url_hash, old.title, old.snippet, old.canonical_url);
-  INSERT INTO search_fts(rowid, title, snippet, canonical_url) 
+  INSERT INTO search_fts(rowid, title, snippet, canonical_url)
   VALUES (new.url_hash, new.title, new.snippet, new.canonical_url);
 END;
 
@@ -97,5 +102,5 @@ CREATE TABLE IF NOT EXISTS hot_topics (
     last_searched_at TEXT NOT NULL DEFAULT (DATETIME('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_hot_topics_freq 
+CREATE INDEX IF NOT EXISTS idx_hot_topics_freq
 ON hot_topics (frequency DESC, last_searched_at DESC);

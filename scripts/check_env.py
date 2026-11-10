@@ -6,7 +6,6 @@ Cloudflare R2 is now optional because Turso stores full-text payloads directly.
 
 import asyncio
 import os
-import sys
 import time
 from dotenv import load_dotenv
 

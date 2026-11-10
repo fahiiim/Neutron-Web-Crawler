@@ -1,30 +1,69 @@
 """Search Gateway Microservice (FastAPI + Gradio SDK).
 
-Runs on Hugging Face Spaces free tier (16 GB RAM).
-Serves the web search UI, queries Turso LibSQL FTS5 index,
-dispatches JIT crawl bursts to the crawler worker, and reads full text directly from Turso.
+Serves the interactive web search UI, queries Turso LibSQL FTS5 index,
+enforces rate limiting and security headers, and dispatches JIT crawl bursts.
 """
 
 import asyncio
 from contextlib import asynccontextmanager
 import json
 import os
-from typing import Any, AsyncGenerator, Dict, List, Set
+import time
+from typing import Any, AsyncGenerator, Coroutine, Dict, List, Set
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
-import gradio as gr
 import httpx
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 from sse_starlette.sse import EventSourceResponse
+import structlog
 
-from compression import decompress_text
-from config import settings
-from db_turso import turso_client
-from storage_r2 import r2_reader
+try:
+    import gradio as gr
+except ImportError:
+    gr = None
 
-templates = Jinja2Templates(directory="templates")
+try:
+    from .compression import decompress_text
+    from .config import settings
+    from .db_turso import turso_client
+except ImportError:
+    from compression import decompress_text
+    from config import settings
+    from db_turso import turso_client
+
+logger = structlog.get_logger("neutron.gateway")
+_START_TIME = time.time()
+
+_TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+templates = Jinja2Templates(directory=_TEMPLATES_DIR)
+
+
+def _ephemeral_key(request: Request) -> str:
+    fwd = request.headers.get("x-forwarded-for")
+    return fwd.split(",")[0].strip() if fwd else get_remote_address(request)
+
+
+limiter = Limiter(key_func=_ephemeral_key)
+
+
+def _fire_and_log(coro: Coroutine[Any, Any, Any], task_name: str) -> asyncio.Task:
+    task = asyncio.create_task(coro)
+
+    def _done(t: asyncio.Task) -> None:
+        try:
+            exc = t.exception()
+            if exc is not None:
+                logger.warning("gateway_task_failed", task=task_name, error=str(exc))
+        except asyncio.CancelledError:
+            pass
+
+    task.add_done_callback(_done)
+    return task
 
 
 @asynccontextmanager
@@ -32,26 +71,37 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application startup and shutdown lifecycle."""
     try:
         await turso_client.connect()
-        print("[Gateway] Connected to Turso DB successfully.")
+        logger.info("gateway_turso_connected")
     except Exception as exc:
-        print(f"[Gateway Startup Warning]: {exc}")
+        logger.warning("gateway_turso_startup_warning", error=str(exc))
     yield
     await turso_client.close()
-    print("[Gateway] Turso DB connection closed.")
+    logger.info("gateway_shutdown_complete")
 
 
 app = FastAPI(
     title="Neutron Search Gateway",
     description="Federated search query coordinator and SSE streaming gateway.",
-    version="2.0.0",
+    version="3.0.0",
     lifespan=lifespan,
 )
+
+app.state.limiter = limiter
+
+
+@app.exception_handler(RateLimitExceeded)
+async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    return JSONResponse(
+        status_code=429,
+        content={"error": "rate_limit_exceeded", "detail": f"Too many requests: {exc.detail}"},
+    )
+
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -59,18 +109,52 @@ app.add_middleware(
 @app.get("/", response_class=HTMLResponse)
 async def serve_home(request: Request) -> Any:
     """Serve the interactive web search engine frontend."""
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request, "index.html")
 
 
 @app.get("/health")
-async def health_check() -> Dict[str, str]:
-    """Health check endpoint for Hugging Face Spaces status monitoring."""
-    return {"status": "ok", "service": "neutron-gateway"}
+async def health_check() -> Dict[str, Any]:
+    """Health check endpoint."""
+    return {"status": "ok", "service": "neutron-gateway", "version": "3.0.0"}
+
+
+@app.get("/trending")
+async def trending_endpoint() -> Dict[str, Any]:
+    return {"trending": await turso_client.get_trending_topics(limit=8)}
+
+
+@app.get("/suggest")
+async def suggest_endpoint(q: str = Query(..., min_length=2, max_length=64)) -> Dict[str, Any]:
+    return {"query": q, "suggestions": await turso_client.get_autocomplete_suggestions(q, limit=6)}
+
+
+@app.get("/stats")
+async def stats_endpoint() -> Dict[str, Any]:
+    db_stats = await turso_client.get_stats()
+    return {
+        **db_stats,
+        "background_crawler_active": True,
+        "uptime_seconds": int(time.time() - _START_TIME),
+    }
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy_endpoint() -> str:
+    return (
+        "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
+        "<title>Neutron Privacy</title></head><body style='background:#000;color:#fff;"
+        "font-family:sans-serif;max-width:680px;margin:40px auto;padding:20px'>"
+        "<h1>Neutron Privacy Promise</h1>"
+        "<p>Zero Tracking &bull; Zero Cookies &bull; Zero Telemetry.</p>"
+        "<p><a href='/' style='color:#00f0ff'>&larr; Back to Neutron</a></p></body></html>"
+    )
 
 
 @app.get("/search")
+@limiter.limit(settings.RATE_LIMIT_SEARCH)
 async def search_endpoint(
-    q: str = Query(..., description="Search query string"),
+    request: Request,
+    q: str = Query(..., min_length=1, max_length=256, description="Search query string"),
     limit: int = Query(15, ge=1, le=50),
 ) -> Dict[str, Any]:
     """Execute unified search: Turso FTS5 BM25 index + JIT crawl cascade."""
@@ -78,13 +162,10 @@ async def search_endpoint(
     if not clean_query:
         return {"query": q, "total": 0, "results": []}
 
-    asyncio.create_task(turso_client.record_hot_topic(clean_query))
-
-    # 1. Query Turso FTS5 Index
+    _fire_and_log(turso_client.record_hot_topic(clean_query), "record_hot_topic")
     cached_hits = await turso_client.search(clean_query, limit=limit)
 
-    # 2. Return immediately if we have sufficient indexed matches
-    if len(cached_hits) >= 5:
+    if len(cached_hits) >= settings.JIT_CACHE_THRESHOLD:
         return {
             "query": clean_query,
             "source": "index_cache",
@@ -92,21 +173,20 @@ async def search_endpoint(
             "results": cached_hits,
         }
 
-    # 3. Cache sparse or miss: trigger live JIT crawl to crawler worker
     jit_hits: List[Dict[str, Any]] = []
-    try:
-        async with httpx.AsyncClient(timeout=4.5) as client:
-            response = await client.post(
-                f"{settings.CRAWLER_SERVICE_URL}/crawl/jit",
-                json={"query": clean_query, "max_pages": 8},
-                headers={"Authorization": f"Bearer {settings.INTERNAL_API_KEY}"},
-            )
-            if response.status_code == 200:
-                jit_hits = response.json().get("results", [])
-    except Exception as exc:
-        print(f"[Gateway JIT Request Warning]: {exc}")
+    if settings.INTERNAL_API_KEY:
+        try:
+            async with httpx.AsyncClient(timeout=6.0) as client:
+                response = await client.post(
+                    f"{settings.CRAWLER_SERVICE_URL.rstrip('/')}/crawl/jit",
+                    json={"query": clean_query, "max_pages": 8},
+                    headers={"Authorization": f"Bearer {settings.INTERNAL_API_KEY}"},
+                )
+                if response.status_code == 200:
+                    jit_hits = response.json().get("results", [])
+        except Exception as exc:
+            logger.warning("gateway_jit_dispatch_failed", error=str(exc))
 
-    # Merge and deduplicate results
     seen_urls: Set[str] = set()
     merged: List[Dict[str, Any]] = []
     for hit in cached_hits + jit_hits:
@@ -124,48 +204,55 @@ async def search_endpoint(
 
 
 @app.get("/search/stream")
-async def search_stream(q: str = Query(..., description="Search query")) -> Any:
+@limiter.limit(settings.RATE_LIMIT_STREAM)
+async def search_stream(
+    request: Request,
+    q: str = Query(..., min_length=1, max_length=256, description="Search query"),
+) -> Any:
     """Stream search results in real time using Server-Sent Events (SSE)."""
     clean_query = q.strip()
+    _fire_and_log(turso_client.record_hot_topic(clean_query), "record_hot_topic")
 
     async def event_generator() -> AsyncGenerator[Dict[str, str], None]:
-        # 1. Yield indexed hits first (<15ms)
+        t0 = time.perf_counter()
         cached_hits = await turso_client.search(clean_query, limit=10)
         yield {
             "event": "cached_results",
-            "data": json.dumps({"count": len(cached_hits), "results": cached_hits}),
+            "data": json.dumps(
+                {
+                    "count": len(cached_hits),
+                    "duration_ms": round((time.perf_counter() - t0) * 1000),
+                    "results": cached_hits,
+                }
+            ),
         }
 
-        # 2. Trigger live JIT crawl if cached hits are sparse
-        if len(cached_hits) < 5:
+        if len(cached_hits) < settings.JIT_CACHE_THRESHOLD and settings.INTERNAL_API_KEY:
+            if await request.is_disconnected():
+                return
             yield {
                 "event": "status",
-                "data": json.dumps(
-                    {"message": "Triggering live JIT crawl across discovery seeds..."}
-                ),
+                "data": json.dumps({"message": "Triggering live JIT crawl across discovery seeds..."}),
             }
 
             try:
-                async with httpx.AsyncClient(timeout=6.0) as client:
+                async with httpx.AsyncClient(timeout=8.0) as client:
                     resp = await client.post(
-                        f"{settings.CRAWLER_SERVICE_URL}/crawl/jit",
+                        f"{settings.CRAWLER_SERVICE_URL.rstrip('/')}/crawl/jit",
                         json={"query": clean_query, "max_pages": 8},
                         headers={"Authorization": f"Bearer {settings.INTERNAL_API_KEY}"},
                     )
                     if resp.status_code == 200:
                         jit_results = resp.json().get("results", [])
                         for item in jit_results:
-                            yield {
-                                "event": "live_result",
-                                "data": json.dumps(item),
-                            }
+                            yield {"event": "live_result", "data": json.dumps(item)}
             except Exception as exc:
+                logger.warning("gateway_stream_jit_failed", error=str(exc))
                 yield {
                     "event": "error",
                     "data": json.dumps({"message": f"Live crawler unavailable: {exc}"}),
                 }
 
-        # 3. Final completion event
         yield {"event": "done", "data": json.dumps({"completed": True})}
 
     return EventSourceResponse(event_generator())
@@ -173,40 +260,46 @@ async def search_stream(q: str = Query(..., description="Search query")) -> Any:
 
 @app.get("/doc/{url_hash}")
 async def get_document(url_hash: int) -> Dict[str, Any]:
-    """Retrieve full extracted markdown article directly from Turso (Sub-5ms, Zero Card)."""
-    # 1. First attempt to read directly from Turso BLOB storage (Zero Card)
+    """Retrieve full extracted markdown article directly from Turso."""
+    if url_hash < -(1 << 63) or url_hash >= (1 << 63):
+        raise HTTPException(status_code=400, detail="Invalid 64-bit url_hash")
+
+    meta = await turso_client.get_document_metadata(url_hash)
     payload_bytes = await turso_client.get_document_payload(url_hash)
     if payload_bytes:
         full_markdown = decompress_text(payload_bytes)
-        return {
-            "url_hash": url_hash,
-            "full_markdown": full_markdown,
-            "source": "turso_blob",
-        }
+        if full_markdown:
+            return {
+                "url_hash": url_hash,
+                "url": meta.get("url") if meta else None,
+                "title": meta.get("title") if meta else None,
+                "crawled_at": meta.get("crawled_at") if meta else None,
+                "full_markdown": full_markdown,
+                "source": "turso_blob",
+            }
 
-    # 2. Fallback to index metadata
-    hits = await turso_client.search(str(url_hash), limit=1)
-    if not hits:
+    if not meta:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    meta = hits[0]
     return {
+        "url_hash": url_hash,
         "url": meta.get("url"),
         "title": meta.get("title"),
+        "crawled_at": meta.get("crawled_at"),
         "full_markdown": meta.get("snippet", ""),
         "source": "snippet_fallback",
     }
 
 
-# Optional Gradio Blocks UI mounted on /gradio
-with gr.Blocks(title="Neutron Search API Explorer") as demo:
-    gr.Markdown("# 🔍 Neutron Search Engine Gateway")
-    gr.Markdown("Direct API & Web Search Interface powered by **Turso LibSQL FTS5 (100% Free)**.")
-    gr.Markdown("Open the root [URL](/) to view the real-time search interface.")
+if gr is not None:
+    with gr.Blocks(title="Neutron Search API Explorer") as demo:
+        gr.Markdown("# Neutron Search Engine Gateway")
+        gr.Markdown("Direct API & Web Search Interface powered by **Turso LibSQL FTS5**.")
+        gr.Markdown("Open the root [URL](/) to view the real-time search interface.")
 
-app = gr.mount_gradio_app(app, demo, path="/gradio")
+    app = gr.mount_gradio_app(app, demo, path="/gradio")
 
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("app:app", host="0.0.0.0", port=7860, reload=False)
+    uvicorn.run(app, host="0.0.0.0", port=settings.PORT)

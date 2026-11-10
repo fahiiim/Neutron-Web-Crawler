@@ -1,131 +1,97 @@
-# Neutron: 10M-Page Real-Time Web Search Engine
+# Neutron v3.0 (Pulsar): Real-Time Decentralized Web Search Engine
 
-A cloud-native, microservice search engine powered by **FastAPI**, **Turso (LibSQL FTS5)**, and **Cloudflare R2**, deployed across **3 independent Hugging Face Spaces (48 GB total RAM, $0/month)**.
+A cloud-native, **zero-telemetry** microservice search engine and live web crawler powered by **FastAPI**, **Turso (LibSQL FTS5)**, and **Playwright Chromium**, designed to run on **free-tier Hugging Face Spaces (\$0/month)** with a **Spinning 3D Neutron Star Pulsar** UI and **Transparent Live Search**.
+
+---
+
+## Key Highlights (v3.0 Pulsar)
+
+- **Spinning 3D Neutron Star UI**: Custom Canvas 2D physical pulsar visualization featuring rotating plasma hotspot bands, precessing dipole magnetic field lines, sweeping lighthouse beams with periodic flash, depth-occluded Keplerian accretion disk, orbital drift, mouse magnetic attraction, and search shockwaves.
+- **Transparent Search (Live Crawl Progress)**: Real-time Server-Sent Events (SSE) stream showing every phase—Turso FTS5 lookup, multi-source discovery (`DuckDuckGo`, `Wikipedia`, `HackerNews`, `arXiv`, `GitHub`, `Reddit`, optional `Brave`), per-domain crawl latency, and `robots.txt` blocks.
+- **Hardened Crawler Core**:
+  - **O(1) URL Bloom Filter** (`mmh3` + `bitarray`) warmed from Turso at startup.
+  - **SimHash Near-Duplicate Detection** (weighted unigrams + 2-gram shingles, Hamming distance <= 3).
+  - **Bounded Concurrency & Retries**: `asyncio.Semaphore` clamping + exponential backoff (`429`/`502`/`503`/`504`).
+  - **Atomic Frontier Queue**: SQLite `UPDATE ... RETURNING` lease lock + automatic 5-minute lease expiration recovery.
+  - **Sitemap.xml & Robots.txt Politeness**: Per-domain async locking, recursive sitemap index + `.xml.gz` support, `rel="nofollow"` filtering.
+  - **Rich Content Extraction**: JSON-LD, OpenGraph, `__NEXT_DATA__` SSR, and semantic HTML-to-Markdown conversion.
+- **Security & Privacy First**:
+  - Zero cookies, zero IP persistence, zero click-tracking redirects ([PRIVACY.md](PRIVACY.md)).
+  - Constant-time internal bearer verification (`hmac.compare_digest`), rate limiting (`slowapi`), FTS5 query sanitization, and `DOMPurify`-hardened Markdown document reader.
 
 ---
 
 ## Architecture Topology
 
-```
-                              [ User Web / API Traffic ]
-                                          │
-                                          ▼
-┌───────────────────────────────────────────────────────────────────────────────────┐
-│ SPACE 1: neutron-gateway (FastAPI) [Port 7860 • 16 GB RAM • Free HF Space]        │
-│ • Serves interactive real-time search UI at GET /                                 │
-│ • Sub-15ms BM25 ranking directly against Turso LibSQL FTS5                        │
-│ • If results < 5, streams live JIT crawl results via Server-Sent Events (SSE)     │
-│ • Fetches compressed full-text markdown articles on demand from Cloudflare R2     │
-└───────────────────────┬───────────────────────────────────────────────────────────┘
-                        │ HTTPS / Bearer Token
-                        ▼
-┌───────────────────────────────────────────────────────────────────────────────────┐
-│ SPACE 2: neutron-crawler (FastAPI) [Port 7860 • 16 GB RAM • Free HF Space]        │
-│ • Priority Lane: On-demand JIT user burst fetches (<600ms via curl_cffi)          │
-│ • Background Lane: 27,400 pages/day Mercator politeness frontier loop             │
-│ • Zero-Browser Next.js / Nuxt SSR JSON extractor + Selectolax parser              │
-│ • Pushes compressed markdown chunks to R2 and writes FTS5 index to Turso          │
-└───────────────────────┬───────────────────────────────────────────────────────────┘
-                        │ HTTPS (Only if page is an empty client-side SPA)
-                        ▼
-┌───────────────────────────────────────────────────────────────────────────────────┐
-│ SPACE 3: neutron-renderer (Playwright) [Port 7860 • 16 GB RAM • Free HF Space]    │
-│ • Memory-clamped headless Chromium worker                                         │
-│ • Aborts images, media, CSS, and fonts via route.abort() for ultra-fast rendering │
-│ • Runs inside 16 GB RAM with zero fear of OOM (Out Of Memory) crashes             │
-└───────────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    User["User Browser / API"] -->|"HTTPS + SSE"| Crawler["Space 1: Neutron_Crawler\n(FastAPI + Gradio + UI)"]
+    Crawler -->|"FTS5 BM25 <15ms\nBatch Transactions"| Turso[("Turso LibSQL\nFTS5 + Zstd Payloads")]
+    Crawler -->|"6 Parallel Discovery\nAdapters + Sitemaps"| Web["Open Web\n(curl_cffi Chrome TLS)"]
+    Crawler -->|"SPA Escalation\nHTTPS + Bearer"| Renderer["Space 2: Neutron_Renderer\n(Playwright Chromium)"]
+    Renderer --> Web
 ```
 
 ---
 
-## 1. Cloud Credential Setup ($0/Month)
+## Performance & Design Comparison
 
-### A. Turso LibSQL (Search Index & Frontier)
-1. Install Turso CLI or log into [turso.tech](https://turso.tech).
-2. Create your database:
-   ```bash
-   turso db create neutron-search
-   ```
-3. Retrieve database URL and authentication token:
-   ```bash
-   turso db show neutron-search --url
-   turso db tokens create neutron-search
-   ```
-4. Apply the FTS5 schema:
-   ```bash
-   turso db shell neutron-search < migrations/03_turso_fts5_schema.sql
-   ```
-
-### B. Cloudflare R2 (Full-Text Object Storage)
-1. Log into [dash.cloudflare.com](https://dash.cloudflare.com) $\rightarrow$ **R2**.
-2. Click **Create bucket** $\rightarrow$ Name it `neutron-page-cache`.
-3. Go to **Manage R2 API Tokens** $\rightarrow$ **Create API Token** (Object Read & Write permission).
-4. Save:
-   * `R2_ACCOUNT_ID`
-   * `R2_ACCESS_KEY_ID`
-   * `R2_SECRET_ACCESS_KEY`
-   * `R2_ENDPOINT_URL` (`https://<account_id>.r2.cloudflarestorage.com`)
+| Capability | Neutron v3.0 | Traditional Search |
+| :--- | :--- | :--- |
+| **Indexed Query Latency** | `< 15ms` (Turso LibSQL FTS5) | `~50–150ms` |
+| **Live Freshness** | Real-time SSE JIT crawl on sparse hits | Delayed batch re-index |
+| **Crawl Transparency** | Full per-source & per-domain live trace | Opaque black box |
+| **Telemetry / Tracking** | Zero cookies, zero IP storage | Extensive user profiling |
+| **Infrastructure Cost** | `$0/month` (HF Spaces + Turso free tier) | Enterprise clusters |
 
 ---
 
-## 2. Deploying to 3 Hugging Face Spaces
+## Quick Start
 
-Hugging Face allows unlimited public Spaces, each with **16 GB RAM and 2 vCPUs** for free.
-
-### Step 1: Create the 3 Spaces on Hugging Face
-Go to [huggingface.co/new-space](https://huggingface.co/new-space) and create 3 separate Spaces:
-
-| Space Name | Space SDK | Port | Local Directory |
-| :--- | :--- | :--- | :--- |
-| `neutron-renderer` | **Docker** | `7860` | `spaces/renderer/` |
-| `neutron-crawler` | **Docker** | `7860` | `spaces/crawler/` |
-| `neutron-gateway` | **Docker** | `7860` | `spaces/gateway/` |
-
-### Step 2: Push Each Subfolder to its Respective Space
-Each folder in `spaces/` is a self-contained Git repository with its own `Dockerfile`, `README.md`, and dependencies:
-
+### 1. Database Initialization (Turso LibSQL)
 ```bash
-# Example: Deploying neutron-renderer
-cd spaces/renderer
-git init
-git remote add origin https://huggingface.co/spaces/<your-username>/neutron-renderer
-git add .
-git commit -m "deploy renderer"
-git push -u origin main --force
-```
-*(Repeat the same process for `spaces/crawler` and `spaces/gateway`)*
-
-### Step 3: Configure Environment Secrets in Hugging Face
-In each Space's **Settings $\rightarrow$ Variables and secrets**, add:
-
-* **For `neutron-renderer`:**
-  * `INTERNAL_API_KEY`
-* **For `neutron-crawler`:**
-  * `INTERNAL_API_KEY`
-  * `TURSO_DATABASE_URL`
-  * `TURSO_AUTH_TOKEN`
-  * `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ENDPOINT_URL`
-  * `RENDERER_SERVICE_URL` (`https://<your-username>-neutron-renderer.hf.space`)
-* **For `neutron-gateway`:**
-  * `INTERNAL_API_KEY`
-  * `TURSO_DATABASE_URL`
-  * `TURSO_AUTH_TOKEN`
-  * `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ENDPOINT_URL`
-  * `CRAWLER_SERVICE_URL` (`https://<your-username>-neutron-crawler.hf.space`)
-
----
-
-## 3. Local Development (Docker Compose)
-
-You can run the entire 3-microservice topology locally before pushing to Hugging Face:
-
-```bash
-# 1. Fill in credentials
 cp .env.example .env
+# Generate a secure internal secret:
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+# Configure TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, and INTERNAL_API_KEY in .env
 
-# 2. Launch all 3 services
+python scripts/init_turso.py
+```
+
+### 2. Run Tests
+```bash
+pip install -r requirements.txt
+python -m unittest discover -s tests -v
+```
+
+### 3. Run Locally
+```bash
+# Option A: Direct Unified Service
+cd spaces/crawler
+uvicorn app:app --host 0.0.0.0 --port 7860 --reload
+
+# Option B: Full Multi-Service Docker Compose
 docker compose up --build
 ```
+Open **`http://localhost:7860`** in your browser.
 
-Access the interactive search engine at:
-👉 **`http://localhost:7860`**
+---
+
+## Hugging Face Spaces CI/CD Deployment
+
+GitHub Actions (`.github/workflows/ci_cd.yml`) automatically runs on every push to `main`:
+1. **`test`**: Syntax verification + `unittest` suite.
+2. **`database-migration`**: Executes `scripts/init_turso.py` against Turso using `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`.
+3. **`deploy-huggingface`**: Syncs `spaces/renderer` (`Neutron_Renderer`) and `spaces/crawler` (`Neutron_Crawler`) to Hugging Face Spaces via `HfApi` using `HF_TOKEN` and `HF_USERNAME`.
+
+Configure these variables/secrets inside each Hugging Face Space's **Settings -> Variables and secrets**:
+- `INTERNAL_API_KEY` (shared random secret between Crawler & Renderer)
+- `TURSO_DATABASE_URL` & `TURSO_AUTH_TOKEN` (on `Neutron_Crawler`)
+- `RENDERER_SERVICE_URL` (`https://<username>-neutron-renderer.hf.space` on `Neutron_Crawler`)
+
+---
+
+## Documentation
+- [CHANGES.md](CHANGES.md) — Detailed v3.0 engineering & UI/UX design plan
+- [PRIVACY.md](PRIVACY.md) — Privacy architecture & zero-telemetry guarantees
+- [CONTRIBUTING.md](CONTRIBUTING.md) — Development setup & PR guidelines

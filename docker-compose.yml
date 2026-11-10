@@ -1,59 +1,86 @@
-version: "3.8"
-
 services:
   gateway:
     build:
       context: ./spaces/gateway
-      dockerfile: Dockerfile
+      dockerfile: ../../docker/Dockerfile.gateway
     container_name: neutron-gateway
     ports:
       - "7860:7860"
     environment:
-      - ENVIRONMENT=development
+      - ENVIRONMENT=${ENVIRONMENT:-development}
       - PORT=7860
-      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-neutron-secret-internal-key}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:?INTERNAL_API_KEY must be set in .env}
       - TURSO_DATABASE_URL=${TURSO_DATABASE_URL}
       - TURSO_AUTH_TOKEN=${TURSO_AUTH_TOKEN}
-      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
-      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
-      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID:-}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID:-}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY:-}
       - R2_BUCKET_NAME=${R2_BUCKET_NAME:-neutron-page-cache}
-      - R2_ENDPOINT_URL=${R2_ENDPOINT_URL}
+      - R2_ENDPOINT_URL=${R2_ENDPOINT_URL:-}
       - CRAWLER_SERVICE_URL=http://crawler:7860
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7860/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 2G
     depends_on:
-      - crawler
+      crawler:
+        condition: service_healthy
 
   crawler:
     build:
       context: ./spaces/crawler
-      dockerfile: Dockerfile
+      dockerfile: ../../docker/Dockerfile.crawler
     container_name: neutron-crawler
     ports:
       - "7861:7860"
     environment:
-      - ENVIRONMENT=development
+      - ENVIRONMENT=${ENVIRONMENT:-development}
       - PORT=7860
-      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-neutron-secret-internal-key}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:?INTERNAL_API_KEY must be set in .env}
       - TURSO_DATABASE_URL=${TURSO_DATABASE_URL}
       - TURSO_AUTH_TOKEN=${TURSO_AUTH_TOKEN}
-      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
-      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
-      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID:-}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID:-}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY:-}
       - R2_BUCKET_NAME=${R2_BUCKET_NAME:-neutron-page-cache}
-      - R2_ENDPOINT_URL=${R2_ENDPOINT_URL}
+      - R2_ENDPOINT_URL=${R2_ENDPOINT_URL:-}
       - RENDERER_SERVICE_URL=http://renderer:7860
       - BACKGROUND_CRAWLER_ENABLED=true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7860/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 4G
     depends_on:
-      - renderer
+      renderer:
+        condition: service_healthy
 
   renderer:
     build:
       context: ./spaces/renderer
-      dockerfile: Dockerfile
+      dockerfile: ../../docker/Dockerfile.renderer
     container_name: neutron-renderer
     ports:
       - "7862:7860"
     environment:
-      - ENVIRONMENT=development
+      - ENVIRONMENT=${ENVIRONMENT:-development}
       - PORT=7860
-      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-neutron-secret-internal-key}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:?INTERNAL_API_KEY must be set in .env}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7860/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 4G

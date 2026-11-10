@@ -1,26 +1,67 @@
 """Database client for managing index insertions, frontier queues, and search in Turso."""
 
+import re
 from typing import Any, Dict, List, Optional
 import libsql_client
 
-from config import settings
+try:
+    from .config import settings
+    from .dedup import hamming_distance
+    from .logging_utils import get_logger
+except ImportError:
+    from config import settings
+    from dedup import hamming_distance
+    from logging_utils import get_logger
 
+logger = get_logger("neutron.db")
+
+_FTS5_RESERVED = {"and", "or", "not", "near"}
 
 STOP_WORDS = {
-    "a", "about", "above", "after", "again", "against", "all", "am", "an", "and",
-    "any", "are", "as", "at", "be", "because", "been", "before", "being",
-    "below", "between", "both", "but", "by", "could", "did", "do", "does",
-    "doing", "down", "during", "each", "few", "for", "from", "further", "had",
-    "has", "have", "having", "he", "her", "here", "hers", "herself", "him",
+    "a", "about", "above", "after", "again", "against", "all", "also", "am", "an",
+    "and", "any", "are", "as", "at", "be", "because", "been", "before", "being",
+    "below", "between", "both", "but", "by", "can", "could", "did", "do", "does",
+    "doing", "down", "during", "each", "few", "for", "from", "further", "get", "go",
+    "had", "has", "have", "having", "he", "her", "here", "hers", "herself", "him",
     "himself", "his", "how", "i", "if", "in", "into", "is", "it", "its", "itself",
-    "me", "more", "most", "my", "myself", "no", "nor", "not", "of", "off", "on",
-    "once", "only", "or", "other", "our", "ours", "ourselves", "out", "over", "own",
-    "same", "she", "should", "so", "some", "such", "than", "that", "the", "their",
-    "theirs", "them", "themselves", "then", "there", "these", "they", "this",
-    "those", "through", "to", "too", "under", "until", "up", "very", "was", "we",
-    "were", "what", "when", "where", "which", "while", "who", "whom", "why",
-    "with", "would", "you", "your", "yours", "yourself", "yourselves"
+    "just", "like", "me", "more", "most", "my", "myself", "no", "nor", "not", "of",
+    "off", "on", "once", "only", "or", "other", "our", "ours", "ourselves", "out",
+    "over", "own", "same", "she", "should", "so", "some", "such", "than", "that",
+    "the", "their", "theirs", "them", "themselves", "then", "there", "these", "they",
+    "this", "those", "through", "to", "too", "under", "until", "up", "very", "was",
+    "we", "were", "what", "when", "where", "which", "while", "who", "whom", "why",
+    "will", "with", "would", "you", "your", "yours", "yourself", "yourselves",
 }
+
+
+def sanitize_fts_terms(query: str) -> List[str]:
+    """Extract safe alphanumeric tokens and strip FTS5 operator syntax."""
+    tokens = re.findall(r"[a-zA-Z0-9]+", (query or "").lower())
+    if not tokens:
+        return []
+
+    multi_char = [t for t in tokens if len(t) > 1]
+    base_tokens = multi_char if multi_char else tokens
+
+    non_reserved = [
+        t for t in base_tokens if t not in STOP_WORDS and t not in _FTS5_RESERVED
+    ]
+    terms = non_reserved if non_reserved else [
+        t for t in base_tokens if t not in _FTS5_RESERVED
+    ]
+    if not terms:
+        terms = base_tokens
+
+    # Deduplicate preserving order and cap at 8 terms
+    seen = set()
+    unique_terms: List[str] = []
+    for term in terms:
+        if term not in seen:
+            seen.add(term)
+            unique_terms.append(term)
+        if len(unique_terms) >= 8:
+            break
+    return unique_terms
 
 
 class TursoCrawlerClient:
@@ -29,18 +70,32 @@ class TursoCrawlerClient:
     def __init__(self) -> None:
         self._client: Optional[libsql_client.Client] = None
 
+    def is_configured(self) -> bool:
+        """Return True if Turso credentials are present."""
+        return bool(
+            settings.TURSO_DATABASE_URL
+            and settings.TURSO_AUTH_TOKEN
+            and "placeholder" not in settings.TURSO_AUTH_TOKEN
+        )
+
     async def connect(self) -> None:
         """Establish persistent async client session to Turso."""
-        if self._client is None:
-            clean_url = (
-                settings.TURSO_DATABASE_URL.replace("libsql://", "https://")
-                if settings.TURSO_DATABASE_URL.startswith("libsql://")
-                else settings.TURSO_DATABASE_URL
-            )
-            self._client = libsql_client.create_client(
-                url=clean_url,
-                auth_token=settings.TURSO_AUTH_TOKEN,
-            )
+        if self._client is not None:
+            return
+        if not self.is_configured():
+            logger.warning("turso_credentials_missing")
+            return
+
+        raw_url = settings.TURSO_DATABASE_URL.strip()
+        clean_url = (
+            raw_url.replace("libsql://", "https://")
+            if raw_url.startswith("libsql://")
+            else raw_url
+        )
+        self._client = libsql_client.create_client(
+            url=clean_url,
+            auth_token=settings.TURSO_AUTH_TOKEN.strip(),
+        )
 
     async def close(self) -> None:
         """Gracefully terminate client session."""
@@ -48,8 +103,17 @@ class TursoCrawlerClient:
             await self._client.close()
             self._client = None
 
+    async def _ensure_client(self) -> Optional[libsql_client.Client]:
+        if self._client is None:
+            await self.connect()
+        return self._client
+
     async def _execute_fts(self, fts_pattern: str, limit: int) -> List[Dict[str, Any]]:
         """Run an FTS5 MATCH query with BM25 ranking."""
+        client = await self._ensure_client()
+        if client is None:
+            return []
+
         sql = """
         SELECT
             s.url_hash,
@@ -58,6 +122,7 @@ class TursoCrawlerClient:
             s.title,
             s.snippet,
             s.opic_authority,
+            s.crawled_at,
             bm25(search_fts, 2.0, 1.0, 0.5) AS bm25_rank
         FROM search_fts f
         JOIN search_index s ON f.rowid = s.url_hash
@@ -66,7 +131,7 @@ class TursoCrawlerClient:
         LIMIT ?;
         """
         try:
-            result_set = await self._client.execute(sql, [fts_pattern, limit])
+            result_set = await client.execute(sql, [fts_pattern, limit])
             results: List[Dict[str, Any]] = []
             for row in result_set.rows:
                 rank_score = round(
@@ -81,40 +146,23 @@ class TursoCrawlerClient:
                         "title": row["title"],
                         "snippet": row["snippet"],
                         "score": rank_score,
+                        "crawled_at": row["crawled_at"],
                     }
                 )
             return results
         except Exception as exc:
-            print(f"[Turso Search Warning]: {exc}")
+            logger.warning("turso_fts_query_failed", pattern=fts_pattern, error=str(exc))
             return []
 
     async def search(self, query: str, limit: int = 15) -> List[Dict[str, Any]]:
-        """Execute high-speed BM25 ranked full-text query against SQLite FTS5 index.
-
-        Removes stop words, applies precision AND query first, and falls back
-        to ranked OR matching for natural-language queries.
-        """
-        if self._client is None:
-            await self.connect()
-
-        raw_tokens = [
-            token.strip().lower()
-            for token in "".join(c for c in query if c.isalnum() or c.isspace()).split()
-            if len(token.strip()) > 1
-        ]
-        if not raw_tokens:
+        """Execute BM25 full-text search with sanitized AND -> OR cascade."""
+        terms = sanitize_fts_terms(query)
+        if not terms:
             return []
 
-        # Filter stop words unless the entire query consists of stop words
-        filtered = [t for t in raw_tokens if t not in STOP_WORDS]
-        terms = filtered if filtered else raw_tokens
-        terms = terms[:8]
-
-        # 1. Attempt precision AND query first
         and_pattern = " ".join([f'"{term}"*' for term in terms])
         hits = await self._execute_fts(and_pattern, limit)
 
-        # 2. If precision query returns sparse results, fall back to ranked OR query
         if len(hits) < 3 and len(terms) > 1:
             or_pattern = " OR ".join([f'"{term}"*' for term in terms])
             or_hits = await self._execute_fts(or_pattern, limit)
@@ -127,24 +175,88 @@ class TursoCrawlerClient:
         return hits[:limit]
 
     async def get_document_payload(self, url_hash: int) -> Optional[bytes]:
-        """Fetch compressed markdown payload directly from Turso (Sub-5ms, Zero-Card)."""
-        if self._client is None:
-            await self.connect()
+        """Fetch compressed markdown payload directly from Turso."""
+        client = await self._ensure_client()
+        if client is None:
+            return None
 
         sql = "SELECT compressed_text FROM page_payloads WHERE url_hash = ? LIMIT 1;"
         try:
-            rs = await self._client.execute(sql, [url_hash])
+            rs = await client.execute(sql, [url_hash])
             if rs.rows:
                 raw_bytes = rs.rows[0]["compressed_text"]
                 return bytes(raw_bytes) if raw_bytes else None
         except Exception as exc:
-            print(f"[Turso Payload Retrieval Warning]: {exc}")
+            logger.warning("turso_payload_read_failed", url_hash=url_hash, error=str(exc))
         return None
+
+    async def get_document_metadata(self, url_hash: int) -> Optional[Dict[str, Any]]:
+        """Retrieve direct metadata row for a url_hash."""
+        client = await self._ensure_client()
+        if client is None:
+            return None
+
+        sql = """
+        SELECT url_hash, canonical_url, title, snippet, crawled_at
+        FROM search_index
+        WHERE url_hash = ?
+        LIMIT 1;
+        """
+        try:
+            rs = await client.execute(sql, [url_hash])
+            if rs.rows:
+                row = rs.rows[0]
+                return {
+                    "url_hash": row["url_hash"],
+                    "url": row["canonical_url"],
+                    "title": row["title"],
+                    "snippet": row["snippet"],
+                    "crawled_at": row["crawled_at"],
+                }
+        except Exception as exc:
+            logger.warning("turso_metadata_read_failed", url_hash=url_hash, error=str(exc))
+        return None
+
+    async def is_near_duplicate(
+        self,
+        simhash_val: int,
+        domain_hash: int,
+        threshold: int = 3,
+        exclude_url_hash: Optional[int] = None,
+    ) -> bool:
+        """Check whether a near-duplicate document already exists for the domain."""
+        client = await self._ensure_client()
+        if client is None or simhash_val == 0:
+            return False
+
+        sql = """
+        SELECT url_hash, simhash
+        FROM search_index
+        WHERE domain_hash = ?
+        LIMIT 200;
+        """
+        try:
+            rs = await client.execute(sql, [domain_hash])
+            for row in rs.rows:
+                row_url_hash = int(row["url_hash"])
+                if exclude_url_hash is not None and row_url_hash == exclude_url_hash:
+                    continue
+                existing_simhash = int(row["simhash"])
+                if hamming_distance(simhash_val, existing_simhash) <= threshold:
+                    return True
+        except Exception as exc:
+            logger.warning("turso_simhash_check_failed", domain_hash=domain_hash, error=str(exc))
+        return False
 
     async def record_hot_topic(self, term: str) -> None:
         """Increment frequency in the hot_topics lexicon for focused crawling."""
-        if self._client is None:
-            await self.connect()
+        client = await self._ensure_client()
+        if client is None:
+            return
+
+        cleaned = term.lower().strip()[:64]
+        if not cleaned:
+            return
 
         sql = """
         INSERT INTO hot_topics (term, frequency, last_searched_at)
@@ -154,9 +266,134 @@ class TursoCrawlerClient:
             last_searched_at = DATETIME('now');
         """
         try:
-            await self._client.execute(sql, [term.lower().strip()[:64]])
-        except Exception:
-            pass
+            await client.execute(sql, [cleaned])
+        except Exception as exc:
+            logger.debug("record_hot_topic_failed", term=cleaned, error=str(exc))
+
+    async def get_trending_topics(self, limit: int = 8) -> List[Dict[str, Any]]:
+        """Return top searched topics for UI trending chips."""
+        client = await self._ensure_client()
+        if client is None:
+            return []
+
+        sql = """
+        SELECT term, frequency
+        FROM hot_topics
+        ORDER BY frequency DESC, last_searched_at DESC
+        LIMIT ?;
+        """
+        try:
+            rs = await client.execute(sql, [limit])
+            return [
+                {"term": str(row["term"]), "count": int(row["frequency"])}
+                for row in rs.rows
+            ]
+        except Exception as exc:
+            logger.warning("get_trending_failed", error=str(exc))
+            return []
+
+    async def get_autocomplete_suggestions(
+        self, prefix: str, limit: int = 6
+    ) -> List[str]:
+        """Return query autocomplete suggestions from hot_topics and indexed titles."""
+        client = await self._ensure_client()
+        clean_prefix = prefix.strip()[:64]
+        if client is None or len(clean_prefix) < 2:
+            return []
+
+        like_pattern = f"{clean_prefix.lower()}%"
+        suggestions: List[str] = []
+        seen = set()
+
+        try:
+            rs_topics = await client.execute(
+                """
+                SELECT term FROM hot_topics
+                WHERE LOWER(term) LIKE ?
+                ORDER BY frequency DESC
+                LIMIT ?;
+                """,
+                [like_pattern, limit],
+            )
+            for row in rs_topics.rows:
+                val = str(row["term"]).strip()
+                if val and val.lower() not in seen:
+                    seen.add(val.lower())
+                    suggestions.append(val)
+
+            if len(suggestions) < limit:
+                rs_titles = await client.execute(
+                    """
+                    SELECT title FROM search_index
+                    WHERE LOWER(title) LIKE ?
+                    ORDER BY crawled_at DESC
+                    LIMIT ?;
+                    """,
+                    [f"%{clean_prefix.lower()}%", limit - len(suggestions)],
+                )
+                for row in rs_titles.rows:
+                    val = str(row["title"]).strip()
+                    if val and val.lower() not in seen:
+                        seen.add(val.lower())
+                        suggestions.append(val)
+        except Exception as exc:
+            logger.debug("autocomplete_query_failed", prefix=clean_prefix, error=str(exc))
+
+        return suggestions[:limit]
+
+    async def get_stats(self) -> Dict[str, Any]:
+        """Return live index & crawl frontier statistics."""
+        client = await self._ensure_client()
+        if client is None:
+            return {
+                "pages_indexed": 0,
+                "domains_covered": 0,
+                "frontier_pending": 0,
+                "payloads_stored": 0,
+                "connected": False,
+            }
+
+        try:
+            results = await client.batch(
+                [
+                    "SELECT COUNT(*) AS cnt FROM search_index;",
+                    "SELECT COUNT(DISTINCT domain_hash) AS cnt FROM search_index;",
+                    "SELECT COUNT(*) AS cnt FROM frontier_queue WHERE status = 0;",
+                    "SELECT COUNT(*) AS cnt FROM page_payloads;",
+                ]
+            )
+            return {
+                "pages_indexed": int(results[0].rows[0]["cnt"]) if results[0].rows else 0,
+                "domains_covered": int(results[1].rows[0]["cnt"]) if results[1].rows else 0,
+                "frontier_pending": int(results[2].rows[0]["cnt"]) if results[2].rows else 0,
+                "payloads_stored": int(results[3].rows[0]["cnt"]) if results[3].rows else 0,
+                "connected": True,
+            }
+        except Exception as exc:
+            logger.warning("get_stats_failed", error=str(exc))
+            return {
+                "pages_indexed": 0,
+                "domains_covered": 0,
+                "frontier_pending": 0,
+                "payloads_stored": 0,
+                "connected": False,
+            }
+
+    async def get_indexed_urls(self, limit: int = 50000) -> List[str]:
+        """Fetch existing canonical URLs to warm the in-memory Bloom filter."""
+        client = await self._ensure_client()
+        if client is None:
+            return []
+
+        try:
+            rs = await client.execute(
+                "SELECT canonical_url FROM search_index ORDER BY crawled_at DESC LIMIT ?;",
+                [limit],
+            )
+            return [str(row["canonical_url"]) for row in rs.rows if row["canonical_url"]]
+        except Exception as exc:
+            logger.warning("bloom_warmup_query_failed", error=str(exc))
+            return []
 
     async def insert_search_index(
         self,
@@ -169,22 +406,25 @@ class TursoCrawlerClient:
         simhash: int,
         compressed_text: Optional[bytes] = None,
     ) -> bool:
-        """Insert or update indexed page metadata and payload directly in Turso."""
-        if self._client is None:
-            await self.connect()
+        """Atomically insert or update indexed metadata and compressed payload in Turso."""
+        client = await self._ensure_client()
+        if client is None:
+            return False
 
         sql_index = """
         INSERT INTO search_index (
             url_hash, domain_hash, canonical_url, title, snippet,
-            opic_authority, simhash
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            opic_authority, simhash, crawled_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, DATETIME('now'))
         ON CONFLICT (url_hash) DO UPDATE SET
             title = excluded.title,
             snippet = excluded.snippet,
-            opic_authority = excluded.opic_authority;
+            opic_authority = excluded.opic_authority,
+            simhash = excluded.simhash,
+            crawled_at = DATETIME('now');
         """
-        try:
-            await self._client.execute(
+        statements = [
+            libsql_client.Statement(
                 sql_index,
                 [
                     url_hash,
@@ -196,94 +436,140 @@ class TursoCrawlerClient:
                     simhash,
                 ],
             )
+        ]
 
-            if compressed_text:
-                sql_payload = """
-                INSERT INTO page_payloads (url_hash, compressed_text)
-                VALUES (?, ?)
-                ON CONFLICT(url_hash) DO UPDATE SET
-                    compressed_text = excluded.compressed_text,
-                    updated_at = DATETIME('now');
-                """
-                await self._client.execute(sql_payload, [url_hash, compressed_text])
+        if compressed_text:
+            sql_payload = """
+            INSERT INTO page_payloads (url_hash, compressed_text, updated_at)
+            VALUES (?, ?, DATETIME('now'))
+            ON CONFLICT(url_hash) DO UPDATE SET
+                compressed_text = excluded.compressed_text,
+                updated_at = DATETIME('now');
+            """
+            statements.append(
+                libsql_client.Statement(sql_payload, [url_hash, compressed_text])
+            )
 
+        try:
+            await client.batch(statements)
             return True
         except Exception as exc:
-            print(f"[Turso Insert Error]: {exc}")
+            logger.error(
+                "turso_insert_failed",
+                url=canonical_url,
+                url_hash=url_hash,
+                error=str(exc),
+                exc_info=True,
+            )
             return False
 
     async def enqueue_frontier_urls(self, urls: List[Dict[str, Any]]) -> int:
-        """Batch insert discovered outbound URLs into the frontier queue."""
-        if self._client is None:
-            await self.connect()
+        """Batch insert discovered outbound URLs into the frontier queue in one round-trip."""
+        if not urls:
+            return 0
+        client = await self._ensure_client()
+        if client is None:
+            return 0
 
         sql = """
         INSERT OR IGNORE INTO frontier_queue (
             url_hash, domain_hash, url, priority_score, status
         ) VALUES (?, ?, ?, ?, 0);
         """
-        enqueued_count = 0
-        for item in urls:
-            try:
-                await self._client.execute(
-                    sql,
-                    [
-                        item["url_hash"],
-                        item["domain_hash"],
-                        item["url"],
-                        item.get("priority", 0.5),
-                    ],
-                )
-                enqueued_count += 1
-            except Exception:
-                pass
-        return enqueued_count
+        statements = [
+            libsql_client.Statement(
+                sql,
+                [
+                    item["url_hash"],
+                    item["domain_hash"],
+                    item["url"],
+                    float(item.get("priority", 0.5)),
+                ],
+            )
+            for item in urls
+        ]
+
+        try:
+            await client.batch(statements)
+            return len(statements)
+        except Exception as exc:
+            logger.warning(
+                "frontier_batch_enqueue_failed",
+                count=len(statements),
+                error=str(exc),
+            )
+            return 0
 
     async def lease_next_frontier_url(self) -> Optional[Dict[str, Any]]:
-        """Lease the highest priority pending URL from the crawl frontier."""
-        if self._client is None:
-            await self.connect()
+        """Atomically lease the highest-priority pending URL from the crawl frontier."""
+        client = await self._ensure_client()
+        if client is None:
+            return None
 
-        select_sql = """
-        SELECT url_hash, domain_hash, url
-        FROM frontier_queue
-        WHERE status = 0
-        ORDER BY priority_score DESC, discovered_at ASC
-        LIMIT 1;
+        atomic_sql = """
+        UPDATE frontier_queue
+        SET status = 1, lease_expires_at = DATETIME('now', '+5 minutes')
+        WHERE url_hash = (
+            SELECT url_hash
+            FROM frontier_queue
+            WHERE status = 0
+            ORDER BY priority_score DESC, discovered_at ASC
+            LIMIT 1
+        )
+        RETURNING url_hash, domain_hash, url;
         """
         try:
-            rs = await self._client.execute(select_sql)
+            rs = await client.execute(atomic_sql)
             if not rs.rows:
                 return None
-
             row = rs.rows[0]
-            url_hash = int(row["url_hash"])
-
-            await self._client.execute(
-                "UPDATE frontier_queue SET status = 1 WHERE url_hash = ?",
-                [url_hash],
-            )
             return {
-                "url_hash": url_hash,
+                "url_hash": int(row["url_hash"]),
                 "domain_hash": int(row["domain_hash"]),
                 "url": str(row["url"]),
             }
         except Exception as exc:
-            print(f"[Turso Frontier Lease Error]: {exc}")
+            logger.warning("frontier_lease_failed", error=str(exc))
             return None
+
+    async def recover_expired_leases(self) -> int:
+        """Reset leased frontier URLs whose 5-minute lease expired back to pending."""
+        client = await self._ensure_client()
+        if client is None:
+            return 0
+
+        sql = """
+        UPDATE frontier_queue
+        SET status = 0, lease_expires_at = NULL
+        WHERE status = 1
+          AND lease_expires_at IS NOT NULL
+          AND lease_expires_at < DATETIME('now');
+        """
+        try:
+            rs = await client.execute(sql)
+            return int(getattr(rs, "rows_affected", 0) or 0)
+        except Exception as exc:
+            logger.warning("frontier_lease_recovery_failed", error=str(exc))
+            return 0
 
     async def update_frontier_status(self, url_hash: int, status: int) -> None:
         """Update crawl status (2=Success, 3=Failed)."""
-        if self._client is None:
-            await self.connect()
+        client = await self._ensure_client()
+        if client is None:
+            return
 
         try:
-            await self._client.execute(
-                "UPDATE frontier_queue SET status = ? WHERE url_hash = ?",
+            await client.execute(
+                "UPDATE frontier_queue SET status = ?, lease_expires_at = NULL WHERE url_hash = ?",
                 [status, url_hash],
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "frontier_status_update_failed",
+                url_hash=url_hash,
+                status=status,
+                error=str(exc),
+            )
 
 
 turso_crawler_client = TursoCrawlerClient()
