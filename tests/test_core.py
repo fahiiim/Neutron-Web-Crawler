@@ -487,6 +487,7 @@ class TestFastAPIEndpoints(unittest.TestCase):
 
             home = client.get("/")
             self.assertEqual(home.status_code, 200)
+            self.assertIn("no-store", home.headers.get("Cache-Control", ""))
             self.assertIn('<div id="root"></div>', home.text)
             self.assertIn('/ui-assets/', home.text)
             import re
@@ -516,6 +517,7 @@ class TestFastAPIEndpoints(unittest.TestCase):
             self.assertEqual(res.json()["service"], "neutron-gateway")
             home = client.get("/")
             self.assertEqual(home.status_code, 200)
+            self.assertIn("no-store", home.headers.get("Cache-Control", ""))
             self.assertIn('<div id="root"></div>', home.text)
             self.assertIn('/ui-assets/', home.text)
             import re

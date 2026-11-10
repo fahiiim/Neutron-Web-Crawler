@@ -135,7 +135,7 @@ jobs:
               folder_path='spaces/crawler',
               repo_id=f'{username}/Neutron_Crawler',
               repo_type='space',
-              delete_patterns=['*.pyc', '__pycache__/*', '.git/*'],
+              delete_patterns=['*.pyc', '__pycache__/*', '.git/*', 'static/ui-assets/*'],
               commit_message=f'ci: automated deployment from commit {sha}'
           )
           print('All Hugging Face microservices synced successfully.')

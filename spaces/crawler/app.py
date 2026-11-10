@@ -316,10 +316,17 @@ if os.path.isdir(_UI_ASSETS_DIR):
 # --------------------------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
 async def serve_home(request: Request) -> Any:
-    """Serve the compiled React search application (or fallback template)."""
+    """Serve the compiled React search application with no-cache headers."""
+    no_cache_headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    }
     if os.path.isfile(_REACT_INDEX):
-        return FileResponse(_REACT_INDEX, media_type="text/html")
-    return templates.TemplateResponse(request, "index.html")
+        return FileResponse(
+            _REACT_INDEX, media_type="text/html", headers=no_cache_headers
+        )
+    return templates.TemplateResponse(request, "index.html", headers=no_cache_headers)
 
 
 @app.get("/health")
