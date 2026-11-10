@@ -13,7 +13,8 @@ from typing import Any, AsyncGenerator, Coroutine, Dict, List, Set
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import httpx
 from slowapi import Limiter
@@ -39,7 +40,11 @@ except ImportError:
 logger = structlog.get_logger("neutron.gateway")
 _START_TIME = time.time()
 
-_TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_TEMPLATES_DIR = os.path.join(_BASE_DIR, "templates")
+_STATIC_DIR = os.path.join(_BASE_DIR, "static")
+_UI_ASSETS_DIR = os.path.join(_STATIC_DIR, "ui-assets")
+_REACT_INDEX = os.path.join(_STATIC_DIR, "index.html")
 templates = Jinja2Templates(directory=_TEMPLATES_DIR)
 
 
@@ -104,11 +109,15 @@ app.add_middleware(
     allow_methods=["GET", "OPTIONS"],
     allow_headers=["*"],
 )
+if os.path.isdir(_UI_ASSETS_DIR):
+    app.mount("/ui-assets", StaticFiles(directory=_UI_ASSETS_DIR), name="ui-assets")
 
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_home(request: Request) -> Any:
-    """Serve the interactive web search engine frontend."""
+    """Serve the compiled React search application (or fallback template)."""
+    if os.path.isfile(_REACT_INDEX):
+        return FileResponse(_REACT_INDEX, media_type="text/html")
     return templates.TemplateResponse(request, "index.html")
 
 
@@ -142,11 +151,11 @@ async def stats_endpoint() -> Dict[str, Any]:
 async def privacy_endpoint() -> str:
     return (
         "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
-        "<title>Neutron Privacy</title></head><body style='background:#000;color:#fff;"
-        "font-family:sans-serif;max-width:680px;margin:40px auto;padding:20px'>"
+        "<title>Neutron Privacy</title></head><body style='background:#06080e;color:#e2e8f0;"
+        "font-family:Inter,sans-serif;max-width:680px;margin:40px auto;padding:20px'>"
         "<h1>Neutron Privacy Promise</h1>"
         "<p>Zero Tracking &bull; Zero Cookies &bull; Zero Telemetry.</p>"
-        "<p><a href='/' style='color:#00f0ff'>&larr; Back to Neutron</a></p></body></html>"
+        "<p><a href='/' style='color:#60a5fa'>&larr; Back to Neutron</a></p></body></html>"
     )
 
 

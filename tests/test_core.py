@@ -487,7 +487,13 @@ class TestFastAPIEndpoints(unittest.TestCase):
 
             home = client.get("/")
             self.assertEqual(home.status_code, 200)
-            self.assertIn("neutron-star-canvas", home.text)
+            self.assertIn('<div id="root"></div>', home.text)
+            self.assertIn('/ui-assets/', home.text)
+            import re
+            asset_match = re.search(r'(/ui-assets/[^"\']+\.js)', home.text)
+            self.assertIsNotNone(asset_match)
+            js_resp = client.get(asset_match.group(1))
+            self.assertEqual(js_resp.status_code, 200)
 
             privacy = client.get("/privacy")
             self.assertEqual(privacy.status_code, 200)
@@ -510,7 +516,13 @@ class TestFastAPIEndpoints(unittest.TestCase):
             self.assertEqual(res.json()["service"], "neutron-gateway")
             home = client.get("/")
             self.assertEqual(home.status_code, 200)
-            self.assertIn("neutron-star-canvas", home.text)
+            self.assertIn('<div id="root"></div>', home.text)
+            self.assertIn('/ui-assets/', home.text)
+            import re
+            asset_match = re.search(r'(/ui-assets/[^"\']+\.js)', home.text)
+            self.assertIsNotNone(asset_match)
+            js_resp = client.get(asset_match.group(1))
+            self.assertEqual(js_resp.status_code, 200)
 
     def test_crawler_search_endpoint_cached_and_hybrid(self):
         cached = [

@@ -6,4 +6,6 @@ __pycache__/
 env/
 data/chunks/
 .DS_Store
+frontend/node_modules/
+
 

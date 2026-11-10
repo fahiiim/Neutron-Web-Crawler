@@ -249,13 +249,13 @@ class TursoCrawlerClient:
         return False
 
     async def record_hot_topic(self, term: str) -> None:
-        """Increment frequency in the hot_topics lexicon for focused crawling."""
+        """Increment frequency in hot_topics for concise, non-conversational terms."""
         client = await self._ensure_client()
         if client is None:
             return
 
-        cleaned = term.lower().strip()[:64]
-        if not cleaned:
+        cleaned = " ".join(term.lower().strip().split())[:64]
+        if not cleaned or len(cleaned) > 40 or len(cleaned.split()) > 5:
             return
 
         sql = """
@@ -271,7 +271,7 @@ class TursoCrawlerClient:
             logger.debug("record_hot_topic_failed", term=cleaned, error=str(exc))
 
     async def get_trending_topics(self, limit: int = 8) -> List[Dict[str, Any]]:
-        """Return top searched topics for UI trending chips."""
+        """Return concise top searched topics for UI trending chips."""
         client = await self._ensure_client()
         if client is None:
             return []
@@ -279,6 +279,10 @@ class TursoCrawlerClient:
         sql = """
         SELECT term, frequency
         FROM hot_topics
+        WHERE LENGTH(term) <= 36
+          AND term NOT LIKE 'what %'
+          AND term NOT LIKE 'who %'
+          AND term NOT LIKE 'how %'
         ORDER BY frequency DESC, last_searched_at DESC
         LIMIT ?;
         """

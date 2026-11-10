@@ -31,6 +31,19 @@ jobs:
           python -m compileall -q spaces scripts tests
           ruff check --select E9,F63,F7,F82 spaces scripts tests
 
+      - name: Set up Node.js & Build React Frontend
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build React SPA Bundle
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+          rm -rf ../spaces/gateway/static
+          cp -r ../spaces/crawler/static ../spaces/gateway/static
+
       - name: Execute Test Suite
         run: |
           python -m unittest discover -s tests -v
@@ -75,6 +88,17 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Set up Node.js & Build React Frontend
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build React SPA Bundle for Spaces
+        run: |
+          cd frontend
+          npm ci
+          npm run build
 
       - name: Install Deployment Dependencies
         run: pip install "huggingface_hub<1.0.0"

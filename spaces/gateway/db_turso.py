@@ -177,8 +177,8 @@ class TursoSearchClient:
         client = await self._ensure_client()
         if client is None:
             return
-        cleaned = term.lower().strip()[:64]
-        if not cleaned:
+        cleaned = " ".join(term.lower().strip().split())[:64]
+        if not cleaned or len(cleaned) > 40 or len(cleaned.split()) > 5:
             return
         try:
             await client.execute(
@@ -200,7 +200,15 @@ class TursoSearchClient:
             return []
         try:
             rs = await client.execute(
-                "SELECT term, frequency FROM hot_topics ORDER BY frequency DESC, last_searched_at DESC LIMIT ?;",
+                """
+                SELECT term, frequency FROM hot_topics
+                WHERE LENGTH(term) <= 36
+                  AND term NOT LIKE 'what %'
+                  AND term NOT LIKE 'who %'
+                  AND term NOT LIKE 'how %'
+                ORDER BY frequency DESC, last_searched_at DESC
+                LIMIT ?;
+                """,
                 [limit],
             )
             return [
