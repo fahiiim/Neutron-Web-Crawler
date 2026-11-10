@@ -183,24 +183,24 @@ export function DocumentModal({
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center sm:p-5"
+      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center sm:p-5"
     >
       <div className="surface-solid w-full h-full sm:h-[86vh] sm:max-w-5xl sm:rounded-2xl flex flex-col overflow-hidden shadow-2xl">
-        {/* Hairline Scroll Progress */}
-        <div className="w-full h-[2px] bg-white/[0.06] shrink-0">
+        {/* Glowy Green Progress Line */}
+        <div className="w-full h-[2px] bg-white/10 shrink-0">
           <div
-            className="h-full bg-sky-400 transition-all duration-100"
+            className="h-full bg-emerald-400 shadow-[0_0_8px_#4ade80] transition-all duration-100"
             style={{ width: `${scrollPct}%` }}
           />
         </div>
 
         {/* Header */}
-        <div className="px-4 sm:px-6 py-3.5 border-b border-white/[0.08] flex items-center justify-between gap-3 shrink-0">
+        <div className="px-4 sm:px-6 py-3.5 border-b border-white/[0.12] flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center space-x-2.5 min-w-0">
-            <FileText className="w-4 h-4 text-sky-400 shrink-0" />
+            <FileText className="w-4 h-4 text-emerald-400 shrink-0" />
             <h2
               id="reader-modal-title"
-              className="font-semibold text-sm sm:text-base text-primary-theme truncate"
+              className="font-varsity text-sm sm:text-base text-white truncate"
             >
               {title}
             </h2>
@@ -212,7 +212,7 @@ export function DocumentModal({
               disabled={!canPrev}
               onClick={onPrev}
               aria-label="Previous result"
-              className="p-1.5 rounded-lg border border-white/[0.08] text-secondary-theme hover:text-primary-theme disabled:opacity-30 transition-colors"
+              className="p-1.5 rounded-lg border border-white/15 text-white hover:text-[#4ade80] disabled:opacity-30 transition-colors"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
@@ -221,7 +221,7 @@ export function DocumentModal({
               disabled={!canNext}
               onClick={onNext}
               aria-label="Next result"
-              className="p-1.5 rounded-lg border border-white/[0.08] text-secondary-theme hover:text-primary-theme disabled:opacity-30 transition-colors"
+              className="p-1.5 rounded-lg border border-white/15 text-white hover:text-[#4ade80] disabled:opacity-30 transition-colors"
             >
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -230,7 +230,7 @@ export function DocumentModal({
               type="button"
               onClick={onClose}
               aria-label="Close reader"
-              className="p-1.5 rounded-lg text-secondary-theme hover:text-primary-theme hover:bg-white/[0.06] transition-colors ml-1"
+              className="p-1.5 rounded-lg text-white hover:bg-white/[0.08] transition-colors ml-1"
             >
               <X className="w-4 h-4" />
             </button>
@@ -240,11 +240,11 @@ export function DocumentModal({
         {/* Body + TOC */}
         <div className="flex-1 flex overflow-hidden">
           {toc.length > 0 && (
-            <aside className="hidden md:block w-60 border-r border-white/[0.07] p-4 overflow-y-auto shrink-0">
-              <div className="font-mono text-[10px] uppercase tracking-wider text-muted-theme mb-3">
-                Contents
+            <aside className="hidden md:block w-60 border-r border-white/[0.1] p-4 overflow-y-auto shrink-0">
+              <div className="font-varsity text-[11px] tracking-wider text-glow-green mb-3">
+                CONTENTS
               </div>
-              <ul className="space-y-1.5 text-xs">
+              <ul className="space-y-1.5 text-xs font-classic">
                 {toc.map((entry) => (
                   <li key={entry.id}>
                     <button
@@ -255,7 +255,7 @@ export function DocumentModal({
                           ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
                       }
                       style={{ paddingLeft: `${Math.max(0, entry.level - 1) * 10}px` }}
-                      className="w-full text-left text-secondary-theme hover:text-primary-theme truncate transition-colors py-0.5"
+                      className="w-full text-left text-white/90 hover:text-[#4ade80] truncate transition-colors py-0.5"
                     >
                       {entry.text}
                     </button>
@@ -271,14 +271,14 @@ export function DocumentModal({
             className="flex-1 p-5 sm:p-8 overflow-y-auto"
           >
             {loading ? (
-              <div className="flex items-center space-x-2 text-xs font-mono text-secondary-theme">
-                <Loader2 className="w-4 h-4 animate-spin text-sky-400" />
+              <div className="flex items-center space-x-2 text-xs font-mono text-glow-green">
+                <Loader2 className="w-4 h-4 animate-spin" />
                 <span>Decompressing document from Turso LibSQL...</span>
               </div>
             ) : (
               <article
                 ref={articleRef}
-                className="markdown-prose max-w-3xl text-sm"
+                className="markdown-prose max-w-3xl text-[15px]"
                 dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
               />
             )}
@@ -286,17 +286,17 @@ export function DocumentModal({
         </div>
 
         {/* Footer */}
-        <div className="px-4 sm:px-6 py-3 border-t border-white/[0.08] flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
+        <div className="px-4 sm:px-6 py-3 border-t border-white/[0.12] flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
           <div className="flex items-center space-x-2">
             <button
               type="button"
               onClick={handleCopyMd}
-              className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border border-white/[0.09] text-secondary-theme hover:text-primary-theme transition-colors font-mono"
+              className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border border-white/20 text-white hover:border-emerald-400/50 transition-colors font-classic"
             >
               {copiedMd ? (
                 <>
                   <Check className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="text-emerald-400">Copied</span>
+                  <span className="text-glow-green">Copied</span>
                 </>
               ) : (
                 <>
@@ -309,12 +309,12 @@ export function DocumentModal({
             <button
               type="button"
               onClick={handleShare}
-              className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border border-white/[0.09] text-secondary-theme hover:text-primary-theme transition-colors font-mono"
+              className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border border-white/20 text-white hover:border-emerald-400/50 transition-colors font-classic"
             >
               {shared ? (
                 <>
                   <Check className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="text-emerald-400">Link Copied</span>
+                  <span className="text-glow-green">Link Copied</span>
                 </>
               ) : (
                 <>
@@ -329,7 +329,7 @@ export function DocumentModal({
                 href={safeHttpUrl(docUrl)}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-lg border border-white/[0.09] text-secondary-theme hover:text-primary-theme transition-colors font-mono"
+                className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-lg border border-white/20 text-white hover:border-emerald-400/50 transition-colors font-classic"
               >
                 <span>Source</span>
                 <ArrowUpRight className="w-3.5 h-3.5" />
@@ -340,7 +340,7 @@ export function DocumentModal({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-1.5 rounded-lg bg-slate-100 text-slate-950 hover:bg-white font-medium transition-colors"
+            className="px-4 py-1.5 rounded-lg bg-white text-black hover:bg-emerald-300 font-classic font-semibold transition-colors"
           >
             Close
           </button>

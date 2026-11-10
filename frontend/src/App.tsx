@@ -18,16 +18,8 @@ const CURATED_TOPICS = [
 ];
 
 const HISTORY_KEY = 'neutron_search_history';
-const THEME_KEY = 'neutron_theme_preference';
 
 export function App() {
-  const [lightMode, setLightMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem(THEME_KEY);
-    if (saved === 'light') return true;
-    if (saved === 'dark') return false;
-    return window.matchMedia('(prefers-color-scheme: light)').matches;
-  });
-
   const [queryInput, setQueryInput] = useState('');
   const [activeQuery, setActiveQuery] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
@@ -36,7 +28,6 @@ export function App() {
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [pulseSignal, setPulseSignal] = useState(0);
 
-  // Trending & Recent
   const [trendingChips, setTrendingChips] = useState<string[]>(CURATED_TOPICS);
   const [recentSearches, setRecentSearches] = useState<string[]>(() => {
     try {
@@ -46,14 +37,12 @@ export function App() {
     }
   });
 
-  // Live Crawl Telemetry
   const [showTelemetry, setShowTelemetry] = useState(false);
   const [telemetryExpanded, setTelemetryExpanded] = useState(true);
   const [indexStatus, setIndexStatus] = useState<{ count: number; durationMs: number } | null>(null);
   const [discoveryMetrics, setDiscoveryMetrics] = useState<DiscoveryMetric[]>([]);
   const [crawlItems, setCrawlItems] = useState<CrawlItemStatus[]>([]);
 
-  // Modals & Navigation
   const [statsOpen, setStatsOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalIdx, setModalIdx] = useState<number>(-1);
@@ -63,18 +52,6 @@ export function App() {
   const inputRef = useRef<HTMLInputElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const autoCollapseRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    if (lightMode) {
-      root.classList.add('light');
-      root.classList.remove('dark');
-    } else {
-      root.classList.remove('light');
-      root.classList.add('dark');
-    }
-    localStorage.setItem(THEME_KEY, lightMode ? 'light' : 'dark');
-  }, [lightMode]);
 
   useEffect(() => {
     (async () => {
@@ -90,7 +67,7 @@ export function App() {
           }
         }
       } catch {
-        // Keep clean curated fallback chips
+        // fallback curated topics
       }
     })();
   }, []);
@@ -108,12 +85,8 @@ export function App() {
       const clean = rawQuery.trim();
       if (!clean) return;
 
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-      }
-      if (autoCollapseRef.current) {
-        window.clearTimeout(autoCollapseRef.current);
-      }
+      if (eventSourceRef.current) eventSourceRef.current.close();
+      if (autoCollapseRef.current) window.clearTimeout(autoCollapseRef.current);
 
       persistHistory(clean);
       setQueryInput(clean);
@@ -178,10 +151,10 @@ export function App() {
         es.addEventListener('discovery_result', (ev) => {
           const metric: DiscoveryMetric = JSON.parse(ev.data);
           setShowTelemetry(true);
-          setDiscoveryMetrics((prev) => {
-            const filtered = prev.filter((m) => m.source !== metric.source);
-            return [...filtered, metric];
-          });
+          setDiscoveryMetrics((prev) => [
+            ...prev.filter((m) => m.source !== metric.source),
+            metric,
+          ]);
         });
 
         es.addEventListener('crawl_start', (ev) => {
@@ -255,7 +228,6 @@ export function App() {
     [persistHistory]
   );
 
-  // Check URL ?q= or ?doc= deep-link on initial mount
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const qParam = params.get('q');
@@ -268,7 +240,6 @@ export function App() {
     }
   }, [executeSearch]);
 
-  // Global keyboard shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (modalOpen || statsOpen) return;
@@ -315,37 +286,30 @@ export function App() {
   const activeUrlHash = deepDocHash ?? (activeDoc ? activeDoc.url_hash : null);
 
   return (
-    <div className="min-h-screen flex flex-col justify-between relative">
-      {/* Real-time 3D WebGL Spinning Neutron Star */}
-      <NeutronStarCanvas
-        dimmed={hasSearched}
-        pulseSignal={pulseSignal}
-        lightMode={lightMode}
-      />
+    <div className="min-h-screen bg-black text-white flex flex-col justify-between relative">
+      {/* 3D WebGL Spinning Neutron Star + Swirling Particle Ribbons */}
+      <NeutronStarCanvas dimmed={hasSearched} pulseSignal={pulseSignal} />
 
       <div className="relative z-10 flex flex-col min-h-screen">
         <Header
-          lightMode={lightMode}
-          onToggleTheme={() => setLightMode((m) => !m)}
           onOpenStats={() => setStatsOpen(true)}
           onResetHome={resetToHome}
           compact={hasSearched}
         />
 
-        {/* Main Viewport */}
         {!hasSearched ? (
-          /* Centered Executive Landing View */
           <main className="flex-1 flex flex-col items-center justify-center px-4 sm:px-6 pb-20 pt-8">
             <div className="w-full max-w-2xl text-center">
-              <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full surface-panel text-[11px] font-mono text-secondary-theme mb-5">
-                <span className="w-1.5 h-1.5 rounded-full bg-sky-400" />
-                <span>Turso FTS5 &middot; Live JIT Web Crawler</span>
+              <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full surface-panel text-[11px] font-mono text-white mb-5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#4ade80]" />
+                <span>Turso FTS5 &middot;</span>
+                <span className="text-glow-green">Live JIT Web Crawler</span>
               </div>
 
-              <h1 className="text-3xl sm:text-5xl font-semibold tracking-[-0.03em] text-primary-theme mb-3">
-                Search the open web, transparently.
+              <h1 className="font-varsity text-3xl sm:text-5xl text-white mb-4 leading-tight">
+                SEARCH THE <span className="text-glow-green">OPEN WEB</span>
               </h1>
-              <p className="text-sm sm:text-[15px] text-secondary-theme max-w-lg mx-auto mb-8 leading-relaxed">
+              <p className="font-classic text-sm sm:text-[15px] text-white/90 max-w-lg mx-auto mb-8 leading-relaxed">
                 Sub-15ms indexed retrieval with parallel live crawling, markdown
                 extraction, and zero user telemetry.
               </p>
@@ -363,14 +327,13 @@ export function App() {
                 inputRef={inputRef}
               />
 
-              {/* Single Clean Curated Prompt Row */}
-              <div className="mt-5 flex items-center justify-center flex-wrap gap-2">
+              <div className="mt-5 flex items-center justify-center flex-wrap gap-2 font-classic">
                 {trendingChips.map((chip) => (
                   <button
                     key={chip}
                     type="button"
                     onClick={() => executeSearch(chip)}
-                    className="text-xs px-3 py-1.5 rounded-lg surface-interactive text-secondary-theme hover:text-primary-theme truncate max-w-[230px]"
+                    className="text-xs px-3.5 py-1.5 rounded-lg surface-interactive text-white hover:text-[#4ade80] truncate max-w-[230px]"
                   >
                     {chip}
                   </button>
@@ -379,7 +342,6 @@ export function App() {
             </div>
           </main>
         ) : (
-          /* Compact Docked Search Results View */
           <main className="flex-1 w-full max-w-3xl mx-auto px-4 sm:px-6 py-6">
             <div className="mb-5">
               <SearchBar
@@ -396,17 +358,17 @@ export function App() {
               />
             </div>
 
-            {/* Result Summary Header */}
-            <div className="flex items-center justify-between text-xs font-mono text-muted-theme mb-3 px-0.5">
+            <div className="flex items-center justify-between text-xs font-mono text-white mb-3 px-0.5">
               <span>
                 {isSearching
                   ? `Searching "${activeQuery}"...`
                   : `${results.length} ${results.length === 1 ? 'result' : 'results'} for "${activeQuery}"`}
               </span>
-              {latencyMs !== null && <span>{latencyMs}ms</span>}
+              {latencyMs !== null && (
+                <span className="text-glow-green">{latencyMs}ms</span>
+              )}
             </div>
 
-            {/* Transparent Live Crawl Telemetry */}
             <CrawlProgressDrawer
               visible={showTelemetry}
               expanded={telemetryExpanded}
@@ -417,7 +379,6 @@ export function App() {
               isSearching={isSearching}
             />
 
-            {/* Skeletons while awaiting first result */}
             {isSearching && results.length === 0 && (
               <div className="space-y-3" aria-hidden="true">
                 {[1, 2, 3].map((k) => (
@@ -425,27 +386,25 @@ export function App() {
                     key={k}
                     className="surface-panel rounded-xl p-5 space-y-2.5 animate-pulse"
                   >
-                    <div className="h-3 w-36 bg-white/[0.06] rounded" />
-                    <div className="h-4 w-3/4 bg-white/[0.09] rounded" />
-                    <div className="h-3 w-full bg-white/[0.05] rounded" />
+                    <div className="h-3 w-36 bg-white/10 rounded" />
+                    <div className="h-4 w-3/4 bg-white/15 rounded" />
+                    <div className="h-3 w-full bg-white/10 rounded" />
                   </div>
                 ))}
               </div>
             )}
 
-            {/* Empty State */}
             {!isSearching && results.length === 0 && (
               <div className="surface-panel rounded-xl p-8 text-center">
-                <p className="text-sm font-medium text-primary-theme mb-1">
-                  No documents found for &ldquo;{activeQuery}&rdquo;
+                <p className="font-varsity text-sm text-white mb-1.5">
+                  NO DOCUMENTS FOUND FOR &ldquo;{activeQuery}&rdquo;
                 </p>
-                <p className="text-xs text-muted-theme">
+                <p className="font-classic text-xs text-white/85">
                   Try shorter technical terms or broaden your search keywords.
                 </p>
               </div>
             )}
 
-            {/* Editorial Results Feed */}
             {results.length > 0 && (
               <ul role="list" className="space-y-3">
                 {results.map((item, idx) => (
@@ -467,22 +426,21 @@ export function App() {
           </main>
         )}
 
-        {/* Quiet Editorial Footer */}
-        <footer className="border-t border-white/[0.06] py-4 px-4 sm:px-6 text-xs text-muted-theme">
+        <footer className="border-t border-white/[0.1] bg-black/75 backdrop-blur-md py-4 px-4 sm:px-6 text-xs text-white font-classic">
           <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
             <div className="inline-flex items-center space-x-2">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
               <span>Zero tracking, cookies, or telemetry</span>
             </div>
-            <div className="flex items-center space-x-5 font-mono text-[11px]">
-              <a href="/privacy" className="hover:text-primary-theme transition-colors">
+            <div className="flex items-center space-x-5 font-mono text-[11px] text-white">
+              <a href="/privacy" className="hover:text-[#4ade80] transition-colors">
                 Privacy
               </a>
               <a
                 href="/docs"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="hover:text-primary-theme transition-colors"
+                className="hover:text-[#4ade80] transition-colors"
               >
                 API Docs
               </a>
@@ -490,7 +448,7 @@ export function App() {
                 href="/health"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="hover:text-primary-theme transition-colors"
+                className="hover:text-[#4ade80] transition-colors"
               >
                 Status
               </a>
@@ -498,7 +456,7 @@ export function App() {
                 href="https://github.com/fahiiim/Neutron-Web-Crawler"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="hover:text-primary-theme transition-colors"
+                className="hover:text-[#4ade80] transition-colors"
               >
                 GitHub
               </a>

@@ -151,11 +151,11 @@ async def stats_endpoint() -> Dict[str, Any]:
 async def privacy_endpoint() -> str:
     return (
         "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
-        "<title>Neutron Privacy</title></head><body style='background:#06080e;color:#e2e8f0;"
-        "font-family:Inter,sans-serif;max-width:680px;margin:40px auto;padding:20px'>"
+        "<title>Neutron Privacy</title></head><body style='background:#000000;color:#ffffff;"
+        "font-family:Georgia,serif;max-width:680px;margin:40px auto;padding:20px'>"
         "<h1>Neutron Privacy Promise</h1>"
         "<p>Zero Tracking &bull; Zero Cookies &bull; Zero Telemetry.</p>"
-        "<p><a href='/' style='color:#60a5fa'>&larr; Back to Neutron</a></p></body></html>"
+        "<p><a href='/' style='color:#4ade80'>&larr; Back to Neutron</a></p></body></html>"
     )
 
 

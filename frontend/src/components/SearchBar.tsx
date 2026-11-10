@@ -37,7 +37,9 @@ export function SearchBar({
         if (res.ok) {
           const data = await res.json();
           const remote: string[] = Array.isArray(data.suggestions) ? data.suggestions : [];
-          setSuggestions(remote.filter((s) => s.toLowerCase() !== trimmed.toLowerCase()).slice(0, 5));
+          setSuggestions(
+            remote.filter((s) => s.toLowerCase() !== trimmed.toLowerCase()).slice(0, 5)
+          );
         }
       } catch {
         setSuggestions([]);
@@ -108,11 +110,11 @@ export function SearchBar({
             compact ? 'rounded-xl px-3 py-1.5' : 'rounded-2xl px-3.5 py-2 shadow-2xl'
           } ${
             focused
-              ? 'border-sky-400/50 ring-1 ring-sky-400/20'
-              : 'hover:border-white/15'
+              ? 'border-emerald-400/70 ring-1 ring-emerald-400/25 shadow-[0_0_24px_rgba(74,222,128,0.16)]'
+              : 'hover:border-white/25'
           }`}
         >
-          <Search className="w-4 h-4 sm:w-[18px] sm:h-[18px] text-muted-theme shrink-0 ml-1 mr-2.5" />
+          <Search className="w-4 h-4 sm:w-[18px] sm:h-[18px] text-emerald-400 shrink-0 ml-1 mr-2.5" />
           <label htmlFor="neutron-search-input" className="sr-only">
             Search the open web
           </label>
@@ -129,7 +131,7 @@ export function SearchBar({
             onKeyDown={handleKeyDown}
             placeholder="Search web, papers, docs, or code..."
             autoComplete="off"
-            className={`w-full bg-transparent text-primary-theme placeholder:text-muted-theme focus:outline-none ${
+            className={`w-full bg-transparent font-classic text-white placeholder:text-white/60 focus:outline-none ${
               compact ? 'text-sm py-1.5' : 'text-[15px] sm:text-base py-2'
             }`}
           />
@@ -141,20 +143,20 @@ export function SearchBar({
                 inputRef.current?.focus();
               }}
               aria-label="Clear query"
-              className="p-1.5 text-muted-theme hover:text-primary-theme transition-colors mr-1"
+              className="p-1.5 text-white/80 hover:text-white transition-colors mr-1"
             >
               <X className="w-3.5 h-3.5" />
             </button>
           )}
-          <div className="hidden md:flex items-center space-x-1 mr-2.5 text-[11px] font-mono text-muted-theme select-none">
-            <kbd className="px-1.5 py-0.5 rounded border border-white/10 bg-white/[0.03]">
+          <div className="hidden md:flex items-center space-x-1 mr-2.5 text-[11px] font-mono text-white/80 select-none">
+            <kbd className="px-1.5 py-0.5 rounded border border-white/20 bg-white/[0.05]">
               /
             </kbd>
           </div>
           <button
             type="submit"
             aria-label="Submit search"
-            className={`shrink-0 inline-flex items-center justify-center font-medium rounded-lg transition-all active:scale-[0.98] bg-slate-100 text-slate-950 hover:bg-white dark:bg-slate-100 dark:text-slate-950 ${
+            className={`shrink-0 inline-flex items-center justify-center font-classic font-semibold rounded-lg transition-all active:scale-[0.98] bg-white text-black hover:bg-emerald-300 ${
               compact ? 'px-3 py-1.5 text-xs' : 'px-4 py-2 text-sm'
             }`}
           >
@@ -170,20 +172,20 @@ export function SearchBar({
           className="absolute left-0 right-0 mt-2 rounded-xl surface-solid shadow-2xl overflow-hidden z-30"
         >
           {matchingRecent.length > 0 && !trimmed && (
-            <div className="flex items-center justify-between px-3.5 py-2 border-b border-white/[0.06] text-[11px] font-mono text-muted-theme">
+            <div className="flex items-center justify-between px-3.5 py-2 border-b border-white/[0.1] text-[11px] font-mono text-white">
               <span>Recent searches</span>
               <button
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={onClearRecent}
-                className="inline-flex items-center space-x-1 hover:text-primary-theme transition-colors"
+                className="inline-flex items-center space-x-1 text-glow-green hover:opacity-80 transition-opacity"
               >
                 <Trash2 className="w-3 h-3" />
                 <span>Clear</span>
               </button>
             </div>
           )}
-          <ul className="divide-y divide-white/[0.04]">
+          <ul className="divide-y divide-white/[0.06]">
             {dropdownItems.map((item, idx) => (
               <li key={`${item.type}-${item.label}`}>
                 <button
@@ -194,16 +196,16 @@ export function SearchBar({
                     setFocused(false);
                     onSubmit(item.label);
                   }}
-                  className={`w-full px-3.5 py-2.5 text-left text-[13px] flex items-center space-x-2.5 transition-colors ${
+                  className={`w-full px-3.5 py-2.5 text-left text-[13px] font-classic flex items-center space-x-2.5 transition-colors ${
                     idx === activeIdx
-                      ? 'bg-sky-500/15 text-primary-theme'
-                      : 'text-secondary-theme hover:bg-white/[0.04] hover:text-primary-theme'
+                      ? 'bg-emerald-500/15 text-glow-green'
+                      : 'text-white hover:bg-white/[0.06]'
                   }`}
                 >
                   {item.type === 'recent' ? (
-                    <Clock className="w-3.5 h-3.5 text-muted-theme shrink-0" />
+                    <Clock className="w-3.5 h-3.5 text-white/80 shrink-0" />
                   ) : (
-                    <Search className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                    <Search className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                   )}
                   <span className="truncate">{item.label}</span>
                 </button>

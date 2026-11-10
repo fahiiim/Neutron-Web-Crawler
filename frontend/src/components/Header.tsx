@@ -1,27 +1,21 @@
-import { BarChart3, Code2, Github, Menu, Moon, Sun, X } from 'lucide-react';
+import { BarChart3, Code2, Github, Menu, X } from 'lucide-react';
 import { useState } from 'react';
 
 interface HeaderProps {
-  lightMode: boolean;
-  onToggleTheme: () => void;
   onOpenStats: () => void;
   onResetHome: () => void;
   compact: boolean;
 }
 
-export function Header({
-  lightMode,
-  onToggleTheme,
-  onOpenStats,
-  onResetHome,
-  compact,
-}: HeaderProps) {
+export function Header({ onOpenStats, onResetHome, compact }: HeaderProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
     <header
       className={`sticky top-0 z-40 transition-colors ${
-        compact ? 'surface-panel border-x-0 border-t-0' : 'border-b border-white/[0.06]'
+        compact
+          ? 'surface-panel border-x-0 border-t-0'
+          : 'border-b border-white/[0.1] bg-black/70 backdrop-blur-md'
       }`}
     >
       <div className="max-w-5xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
@@ -30,25 +24,23 @@ export function Header({
           onClick={onResetHome}
           className="flex items-center space-x-2.5 text-left group focus:outline-none"
         >
-          {/* Minimalist geometric pulsar emblem */}
           <svg
             width="24"
             height="24"
             viewBox="0 0 24 24"
             fill="none"
-            className="text-sky-400 transition-transform duration-500 group-hover:rotate-45"
+            className="text-white transition-transform duration-500 group-hover:rotate-45"
             aria-hidden="true"
           >
-            <circle cx="12" cy="12" r="2.2" fill="currentColor" />
+            <circle cx="12" cy="12" r="2.4" fill="currentColor" />
             <ellipse
               cx="12"
               cy="12"
               rx="9.5"
               ry="4"
               transform="rotate(-25 12 12)"
-              stroke="currentColor"
+              stroke="#4ade80"
               strokeWidth="1.25"
-              strokeOpacity="0.65"
             />
             <line
               x1="7.5"
@@ -57,36 +49,37 @@ export function Header({
               y2="21.5"
               stroke="currentColor"
               strokeWidth="1.15"
-              strokeOpacity="0.45"
+              strokeOpacity="0.7"
             />
           </svg>
-          <span className="font-semibold text-[16px] tracking-tight text-primary-theme">
-            Neutron
-          </span>
-          <span className="text-[11px] font-mono text-muted-theme hidden sm:inline">
+          <span className="font-varsity text-[18px] text-white">NEUTRON</span>
+          <span className="text-[11px] font-mono text-glow-green hidden sm:inline">
             v3
           </span>
         </button>
 
         {/* Desktop Nav */}
-        <nav className="hidden sm:flex items-center space-x-1 text-[13px]" aria-label="Primary">
-          <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-secondary-theme font-mono text-[11px] mr-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+        <nav
+          className="hidden sm:flex items-center space-x-2 text-[13px] font-classic"
+          aria-label="Primary"
+        >
+          <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-glow-green font-mono text-[11px] mr-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#4ade80]" />
             <span>Operational</span>
           </span>
           <button
             type="button"
             onClick={onOpenStats}
-            className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg text-secondary-theme hover:text-primary-theme hover:bg-white/[0.05] transition-colors"
+            className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-white hover:bg-white/[0.07] transition-colors"
           >
-            <BarChart3 className="w-3.5 h-3.5" />
+            <BarChart3 className="w-3.5 h-3.5 text-emerald-400" />
             <span>Stats</span>
           </button>
           <a
             href="/docs"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg text-secondary-theme hover:text-primary-theme hover:bg-white/[0.05] transition-colors"
+            className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-white hover:bg-white/[0.07] transition-colors"
           >
             <Code2 className="w-3.5 h-3.5" />
             <span>API</span>
@@ -95,37 +88,21 @@ export function Header({
             href="https://github.com/fahiiim/Neutron-Web-Crawler"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg text-secondary-theme hover:text-primary-theme hover:bg-white/[0.05] transition-colors"
+            className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-white hover:bg-white/[0.07] transition-colors"
           >
             <Github className="w-3.5 h-3.5" />
             <span>Source</span>
           </a>
-          <button
-            type="button"
-            onClick={onToggleTheme}
-            aria-label="Toggle color theme"
-            className="p-2 rounded-lg text-secondary-theme hover:text-primary-theme hover:bg-white/[0.05] transition-colors ml-1"
-          >
-            {lightMode ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
-          </button>
         </nav>
 
         {/* Mobile Controls */}
-        <div className="flex sm:hidden items-center space-x-1">
-          <button
-            type="button"
-            onClick={onToggleTheme}
-            aria-label="Toggle color theme"
-            className="p-2 rounded-lg text-secondary-theme hover:text-primary-theme"
-          >
-            {lightMode ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
-          </button>
+        <div className="flex sm:hidden items-center">
           <button
             type="button"
             onClick={() => setMobileOpen((v) => !v)}
             aria-label="Toggle navigation menu"
             aria-expanded={mobileOpen}
-            className="p-2 rounded-lg text-secondary-theme hover:text-primary-theme"
+            className="p-2 rounded-lg text-white"
           >
             {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
@@ -133,23 +110,23 @@ export function Header({
       </div>
 
       {mobileOpen && (
-        <div className="sm:hidden surface-panel border-x-0 px-4 py-3 flex items-center justify-between text-xs">
+        <div className="sm:hidden surface-panel border-x-0 px-4 py-3 flex items-center justify-between text-xs font-classic text-white">
           <button
             type="button"
             onClick={() => {
               setMobileOpen(false);
               onOpenStats();
             }}
-            className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg surface-interactive text-secondary-theme"
+            className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg surface-interactive text-white"
           >
-            <BarChart3 className="w-3.5 h-3.5" />
+            <BarChart3 className="w-3.5 h-3.5 text-emerald-400" />
             <span>Stats</span>
           </button>
           <a
             href="/docs"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg surface-interactive text-secondary-theme"
+            className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg surface-interactive text-white"
           >
             <Code2 className="w-3.5 h-3.5" />
             <span>API Docs</span>
@@ -158,7 +135,7 @@ export function Header({
             href="https://github.com/fahiiim/Neutron-Web-Crawler"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg surface-interactive text-secondary-theme"
+            className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg surface-interactive text-white"
           >
             <Github className="w-3.5 h-3.5" />
             <span>Source</span>

@@ -19,16 +19,14 @@ export function StatsDrawer({ open, onClose }: StatsDrawerProps) {
         setStats(await res.json());
       }
     } catch {
-      // ignore network error
+      // ignore
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (open) {
-      fetchStats();
-    }
+    if (open) fetchStats();
   }, [open]);
 
   useEffect(() => {
@@ -58,19 +56,19 @@ export function StatsDrawer({ open, onClose }: StatsDrawerProps) {
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      className="fixed inset-0 z-50 bg-black/65 backdrop-blur-sm flex justify-end"
+      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex justify-end"
     >
       <div className="surface-solid w-full max-w-sm h-full p-6 flex flex-col justify-between shadow-2xl border-y-0 border-r-0">
         <div>
-          <div className="flex items-center justify-between pb-4 mb-5 border-b border-white/[0.08]">
+          <div className="flex items-center justify-between pb-4 mb-5 border-b border-white/[0.12]">
             <div>
               <h2
                 id="stats-drawer-title"
-                className="font-semibold text-base text-primary-theme"
+                className="font-varsity text-base text-white"
               >
-                Cluster Telemetry
+                CLUSTER TELEMETRY
               </h2>
-              <p className="text-xs text-muted-theme mt-0.5">
+              <p className="text-xs font-classic text-white/85 mt-0.5">
                 Live Turso LibSQL &amp; Frontier Metrics
               </p>
             </div>
@@ -78,65 +76,63 @@ export function StatsDrawer({ open, onClose }: StatsDrawerProps) {
               type="button"
               onClick={onClose}
               aria-label="Close telemetry panel"
-              className="p-1.5 rounded-lg text-secondary-theme hover:text-primary-theme hover:bg-white/[0.06]"
+              className="p-1.5 rounded-lg text-white hover:bg-white/[0.08]"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
 
           <div className="grid grid-cols-2 gap-3 font-mono">
-            <div className="p-3.5 rounded-xl bg-white/[0.02] border border-white/[0.06]">
-              <div className="text-[11px] text-muted-theme mb-1">Pages Indexed</div>
-              <div className="text-xl font-semibold text-primary-theme">
+            <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/[0.1]">
+              <div className="text-[11px] text-white/85 mb-1">Pages Indexed</div>
+              <div className="text-xl font-semibold text-glow-green">
                 {stats ? stats.pages_indexed.toLocaleString() : '—'}
               </div>
             </div>
-            <div className="p-3.5 rounded-xl bg-white/[0.02] border border-white/[0.06]">
-              <div className="text-[11px] text-muted-theme mb-1">Domains</div>
-              <div className="text-xl font-semibold text-primary-theme">
+            <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/[0.1]">
+              <div className="text-[11px] text-white/85 mb-1">Domains</div>
+              <div className="text-xl font-semibold text-white">
                 {stats ? stats.domains_covered.toLocaleString() : '—'}
               </div>
             </div>
-            <div className="p-3.5 rounded-xl bg-white/[0.02] border border-white/[0.06]">
-              <div className="text-[11px] text-muted-theme mb-1">Frontier Queue</div>
-              <div className="text-xl font-semibold text-primary-theme">
+            <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/[0.1]">
+              <div className="text-[11px] text-white/85 mb-1">Frontier Queue</div>
+              <div className="text-xl font-semibold text-white">
                 {stats ? stats.frontier_pending.toLocaleString() : '—'}
               </div>
             </div>
-            <div className="p-3.5 rounded-xl bg-white/[0.02] border border-white/[0.06]">
-              <div className="text-[11px] text-muted-theme mb-1">Stored Blobs</div>
-              <div className="text-xl font-semibold text-primary-theme">
+            <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/[0.1]">
+              <div className="text-[11px] text-white/85 mb-1">Stored Blobs</div>
+              <div className="text-xl font-semibold text-glow-green">
                 {stats ? stats.payloads_stored.toLocaleString() : '—'}
               </div>
             </div>
           </div>
 
-          <div className="mt-4 p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-2.5 text-xs font-mono">
+          <div className="mt-4 p-4 rounded-xl bg-white/[0.03] border border-white/[0.1] space-y-2.5 text-xs font-mono">
             <div className="flex items-center justify-between">
-              <span className="text-muted-theme">Background Politeness</span>
+              <span className="text-white/85">Background Politeness</span>
               <span
                 className={
                   stats?.background_crawler_active
-                    ? 'text-emerald-400'
-                    : 'text-secondary-theme'
+                    ? 'text-glow-green'
+                    : 'text-white'
                 }
               >
                 {stats?.background_crawler_active ? 'Active' : 'Idle'}
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-muted-theme">Bloom Filter Entries</span>
-              <span className="text-primary-theme">
+              <span className="text-white/85">Bloom Filter Entries</span>
+              <span className="text-white">
                 {stats?.bloom_entries !== undefined
                   ? stats.bloom_entries.toLocaleString()
                   : '—'}
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-muted-theme">Worker Uptime</span>
-              <span className="text-primary-theme">
-                {formatUptime(stats?.uptime_seconds)}
-              </span>
+              <span className="text-white/85">Worker Uptime</span>
+              <span className="text-white">{formatUptime(stats?.uptime_seconds)}</span>
             </div>
           </div>
         </div>
@@ -145,7 +141,7 @@ export function StatsDrawer({ open, onClose }: StatsDrawerProps) {
           type="button"
           onClick={fetchStats}
           disabled={loading}
-          className="w-full py-2.5 rounded-xl bg-slate-100 text-slate-950 hover:bg-white font-medium text-xs inline-flex items-center justify-center space-x-2 transition-colors disabled:opacity-60"
+          className="w-full py-2.5 rounded-xl bg-white text-black hover:bg-emerald-300 font-classic font-semibold text-xs inline-flex items-center justify-center space-x-2 transition-colors disabled:opacity-60"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           <span>Refresh Telemetry</span>

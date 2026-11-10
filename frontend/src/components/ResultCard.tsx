@@ -32,7 +32,7 @@ function HighlightedSnippet({ text, query }: { text: string; query: string }) {
         part && termSet.has(part.toLowerCase()) ? (
           <mark
             key={idx}
-            className="bg-sky-500/15 text-primary-theme font-medium px-0.5 rounded"
+            className="bg-emerald-500/15 text-glow-green font-semibold px-1 rounded"
           >
             {part}
           </mark>
@@ -64,7 +64,7 @@ export function ResultCard({
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     } catch {
-      // ignore clipboard permission failure
+      // ignore
     }
   };
 
@@ -73,12 +73,12 @@ export function ResultCard({
       role="listitem"
       style={{ animationDelay: `${Math.min(index * 55, 360)}ms` }}
       className={`animate-result-in surface-interactive rounded-xl p-4 sm:p-5 ${
-        focused ? 'border-sky-400/50 ring-1 ring-sky-400/20' : ''
+        focused ? 'border-emerald-400/70 ring-1 ring-emerald-400/25' : ''
       }`}
     >
       {/* Top Meta Row */}
       <div className="flex items-center justify-between gap-3 mb-2">
-        <div className="flex items-center space-x-2 min-w-0 text-xs font-mono">
+        <div className="flex items-center space-x-2 min-w-0 text-xs font-mono text-white">
           {!faviconBroken ? (
             <img
               src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`}
@@ -86,22 +86,22 @@ export function ResultCard({
               width={16}
               height={16}
               onError={() => setFaviconBroken(true)}
-              className="w-4 h-4 rounded-sm shrink-0 bg-white/5"
+              className="w-4 h-4 rounded-sm shrink-0 bg-white/10"
             />
           ) : (
-            <Globe className="w-3.5 h-3.5 text-muted-theme shrink-0" />
+            <Globe className="w-3.5 h-3.5 text-white shrink-0" />
           )}
-          <span className="text-secondary-theme font-medium truncate">{domain}</span>
-          {path && <span className="text-muted-theme truncate hidden sm:inline">{path}</span>}
+          <span className="font-medium text-white truncate">{domain}</span>
+          {path && <span className="text-white/80 truncate hidden sm:inline">{path}</span>}
         </div>
 
         <div className="flex items-center space-x-2 shrink-0 text-[11px] font-mono">
-          <span className="text-muted-theme">{freshness}</span>
+          <span className="text-white/90">{freshness}</span>
           <span
             className={`px-2 py-0.5 rounded-md border ${
               item.isLive
-                ? 'bg-sky-500/10 text-sky-400 border-sky-400/25'
-                : 'bg-white/[0.03] text-muted-theme border-white/[0.07]'
+                ? 'bg-emerald-500/10 text-glow-green border-emerald-400/40'
+                : 'bg-white/[0.04] text-white border-white/20'
             }`}
           >
             {item.isLive ? 'Live' : 'Indexed'}
@@ -110,31 +110,31 @@ export function ResultCard({
       </div>
 
       {/* Title */}
-      <h2 className="text-[16px] sm:text-[17px] font-semibold tracking-tight text-primary-theme mb-1.5 leading-snug">
+      <h2 className="font-varsity text-[15px] sm:text-[16px] text-white mb-2 leading-snug">
         <a
           href={safeUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="hover:text-sky-400 transition-colors"
+          className="hover:text-[#4ade80] transition-colors"
         >
           {item.title || safeUrl}
         </a>
       </h2>
 
-      {/* Snippet */}
-      <p className="text-[13.5px] sm:text-[14px] text-secondary-theme leading-relaxed line-clamp-3 mb-3.5">
+      {/* Classic Serif Snippet */}
+      <p className="font-classic text-[14px] text-white/95 leading-relaxed line-clamp-3 mb-3.5">
         <HighlightedSnippet
           text={item.snippet || 'No preview available for this document.'}
           query={query}
         />
       </p>
 
-      {/* Quiet Actions */}
-      <div className="flex items-center space-x-4 pt-2.5 border-t border-white/[0.06] text-xs text-muted-theme">
+      {/* Actions */}
+      <div className="flex items-center space-x-5 pt-2.5 border-t border-white/[0.1] text-xs font-classic text-white">
         <button
           type="button"
           onClick={onOpenReader}
-          className="inline-flex items-center space-x-1.5 text-sky-400 hover:text-sky-300 font-medium transition-colors"
+          className="inline-flex items-center space-x-1.5 text-glow-green hover:opacity-85 font-semibold transition-opacity"
         >
           <BookOpen className="w-3.5 h-3.5" />
           <span>Reader</span>
@@ -143,12 +143,12 @@ export function ResultCard({
         <button
           type="button"
           onClick={handleCopy}
-          className="inline-flex items-center space-x-1.5 hover:text-primary-theme transition-colors"
+          className="inline-flex items-center space-x-1.5 text-white hover:text-[#4ade80] transition-colors"
         >
           {copied ? (
             <>
               <Check className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="text-emerald-400">Copied</span>
+              <span className="text-glow-green">Copied</span>
             </>
           ) : (
             <>
@@ -162,7 +162,7 @@ export function ResultCard({
           href={safeUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center space-x-1 hover:text-primary-theme transition-colors ml-auto"
+          className="inline-flex items-center space-x-1 text-white hover:text-[#4ade80] transition-colors ml-auto"
         >
           <span>Open</span>
           <ArrowUpRight className="w-3.5 h-3.5" />
