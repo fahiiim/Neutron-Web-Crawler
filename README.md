@@ -1,23 +1,23 @@
-# Neutron v3.0 (Pulsar): Real-Time Decentralized Web Search Engine
+# Neutron v3.0 (Pulsar): Real-Time Decentralized Web Search & Research Engine
 
-A cloud-native, **zero-telemetry** microservice search engine and live web crawler powered by **FastAPI**, **Turso (LibSQL FTS5)**, and **Playwright Chromium**, designed to run on **free-tier Hugging Face Spaces (\$0/month)** with a **Spinning 3D Neutron Star Pulsar** UI and **Transparent Live Search**.
+A cloud-native, **zero-telemetry** search engine, real-time web crawler, and AI-agent research API powered by **React + TypeScript**, **FastAPI**, **Turso (LibSQL FTS5)**, and **Playwright Chromium**, designed to run on **free-tier Hugging Face Spaces (\$0/month)**.
 
 ---
 
-## Key Highlights (v3.0 Pulsar)
+## Key Highlights
 
-- **Spinning 3D Neutron Star UI**: Custom Canvas 2D physical pulsar visualization featuring rotating plasma hotspot bands, precessing dipole magnetic field lines, sweeping lighthouse beams with periodic flash, depth-occluded Keplerian accretion disk, orbital drift, mouse magnetic attraction, and search shockwaves.
-- **Transparent Search (Live Crawl Progress)**: Real-time Server-Sent Events (SSE) stream showing every phase—Turso FTS5 lookup, multi-source discovery (`DuckDuckGo`, `Wikipedia`, `HackerNews`, `arXiv`, `GitHub`, `Reddit`, optional `Brave`), per-domain crawl latency, and `robots.txt` blocks.
-- **Hardened Crawler Core**:
+- **Instant Grounded Answer Synthesis**: Extracts top declarative passages across indexed & live-crawled Markdown articles (`page_payloads`) and displays a cited summary (`[1] [2]`) that opens directly in the clean Reader modal (`/?doc=<url_hash>`).
+- **Fast-Fail Live Cascade (`< 5s` JIT Deadline)**: Runs tight live timeouts (`3.0s` HTTP, `1` retry, `4.5s` renderer escalation), caches WAF/anti-bot-blocked domains for 24h cooldown, and streams per-source discovery telemetry via SSE (`All Web`, `Encyclopedia`, `Papers`, `Code`, `Discussions`).
+- **Developer & AI-Agent Research API (`/api/research`)**: Returns structured grounded answers, inline citations, focused excerpts, and optional full decompressed Markdown per source (`GET /api/research?q=...&include_markdown=true`).
+- **High-Precision Search & Hardened Crawler Core**:
   - **O(1) URL Bloom Filter** (`mmh3` + `bitarray`) warmed from Turso at startup.
   - **SimHash Near-Duplicate Detection** (weighted unigrams + 2-gram shingles, Hamming distance <= 3).
-  - **Bounded Concurrency & Retries**: `asyncio.Semaphore` clamping + exponential backoff (`429`/`502`/`503`/`504`).
-  - **Atomic Frontier Queue**: SQLite `UPDATE ... RETURNING` lease lock + automatic 5-minute lease expiration recovery.
-  - **Sitemap.xml & Robots.txt Politeness**: Per-domain async locking, recursive sitemap index + `.xml.gz` support, `rel="nofollow"` filtering.
-  - **Rich Content Extraction**: JSON-LD, OpenGraph, `__NEXT_DATA__` SSR, and semantic HTML-to-Markdown conversion.
+  - **Stemmed + Quorum FTS5 Search**: Porter-stemmed BM25 (`4.0` title / `1.5` deep ~1,200-char prose snippet / `0.5` URL) without noisy 1-term `OR` dilution.
+  - **Domain-Interleaved Frontier Queue**: SQLite `UPDATE ... RETURNING` lease lock with `domains.next_fetch_at` rotation + 5-minute lease recovery.
+  - **WAF / Binary Gate & Politeness**: Rejects Cloudflare/Akamai interstitials and `.pdf`/binary seeds; respects `robots.txt` (`NeutronBot/3.0`) and `sitemap.xml` / `.xml.gz`.
 - **Security & Privacy First**:
   - Zero cookies, zero IP persistence, zero click-tracking redirects ([PRIVACY.md](PRIVACY.md)).
-  - Constant-time internal bearer verification (`hmac.compare_digest`), rate limiting (`slowapi`), FTS5 query sanitization, and `DOMPurify`-hardened Markdown document reader.
+  - Constant-time internal bearer verification (`hmac.compare_digest`), `slowapi` rate limiting, `str` 64-bit `url_hash` JSON serialization, `DOMPurify`-sanitized Markdown reader, and strict response security headers.
 
 ---
 

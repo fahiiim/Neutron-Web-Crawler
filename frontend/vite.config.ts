@@ -20,6 +20,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      '/api': 'http://localhost:7860',
       '/search': 'http://localhost:7860',
       '/doc': 'http://localhost:7860',
       '/trending': 'http://localhost:7860',

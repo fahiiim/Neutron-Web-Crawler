@@ -31,6 +31,10 @@ from spaces.crawler.parser import (
 )
 from spaces.crawler.robots import RobotsTxtManager
 from spaces.crawler.sitemap import discover_sitemap_urls
+from spaces.crawler.synthesis import (
+    extract_query_focused_snippet,
+    synthesize_grounded_answer,
+)
 from spaces.gateway import app as gateway_app_module
 from spaces.gateway.config import GatewaySettings
 
@@ -244,6 +248,77 @@ class TestParserAndSecurity(unittest.TestCase):
         parsed = parse_page_content(no_title_html, "https://docs.example.org/h1")
         self.assertEqual(parsed["title"], "Fallback Heading Title")
         self.assertFalse(parsed["is_waf_blocked"])
+
+    def test_waf_domain_cooldown_and_vertical_mode_filtering(self):
+        async def _run():
+            seen_urls_called = []
+
+            async def fake_get(url, **kwargs):
+                seen_urls_called.append(url)
+                resp = MagicMock()
+                resp.status_code = 200
+                resp.headers = {}
+                if "export.arxiv.org" in url:
+                    resp.text = (
+                        "<feed xmlns='http://www.w3.org/2005/Atom'>"
+                        "<entry><id>https://arxiv.org/abs/2611.9999</id></entry></feed>"
+                    )
+                elif "wikipedia.org" in url:
+                    resp.json = lambda: {"query": {"search": []}}
+                else:
+                    resp.text = '<a href="/l/?uddg=https%3A%2F%2Fblocked.example%2Fpaper">Blocked</a>'
+                return resp
+
+            mock_client = AsyncMock()
+            mock_client.get = AsyncMock(side_effect=fake_get)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+
+            with patch("spaces.crawler.discovery.httpx.AsyncClient", return_value=mock_client):
+                urls, metrics = await discover_seed_urls_detailed(
+                    "quantum paper",
+                    max_urls=8,
+                    mode="papers",
+                    skip_domains={"blocked.example"},
+                )
+
+            sources = {m["source"] for m in metrics}
+            self.assertEqual(sources, {"arxiv", "wikipedia", "duckduckgo"})
+            self.assertEqual(urls, ["https://arxiv.org/abs/2611.9999"])
+            self.assertFalse(any("api.github.com" in u or "reddit.com" in u for u in seen_urls_called))
+
+        import asyncio
+        asyncio.run(_run())
+
+    def test_synthesis_and_focused_excerpt(self):
+        long_text = (
+            "Introduction to modern software engineering practices and server setup. "
+            "Many web frameworks handle routing efficiently across workers. "
+            "FastAPI middleware intercepts every incoming HTTP request before your path operation runs, enabling custom logging and security headers. "
+            "This concludes our overview."
+        )
+        excerpt = extract_query_focused_snippet("fastapi middleware logging", long_text, max_len=160)
+        self.assertIn("FastAPI middleware intercepts", excerpt)
+
+        docs = [
+            {
+                "url_hash": "101",
+                "url": "https://en.wikipedia.org/wiki/J._K._Rowling",
+                "title": "J. K. Rowling - Wikipedia",
+                "full_text": "Joanne Rowling, known as J. K. Rowling, is a British author who wrote the Harry Potter fantasy series.",
+            },
+            {
+                "url_hash": "102",
+                "url": "https://www.britannica.com/biography/J-K-Rowling",
+                "title": "J.K. Rowling | Britannica",
+                "full_text": "J.K. Rowling created the boy wizard Harry Potter and published seven novels between 1997 and 2007.",
+            },
+        ]
+        ans = synthesize_grounded_answer("Who wrote Harry Potter?", docs)
+        self.assertIsNotNone(ans)
+        self.assertIn("[1]", ans["summary"])
+        self.assertIn("Joanne Rowling", ans["summary"])
+        self.assertEqual(ans["citations"][0]["url_hash"], "101")
 
     def test_config_rejects_hardcoded_placeholder_keys(self):
         with self.assertRaises(ValidationError):
@@ -669,16 +744,17 @@ class TestFastAPIEndpoints(unittest.TestCase):
     def test_crawler_search_endpoint_cached_and_hybrid(self):
         cached = [
             {
-                "url_hash": i,
+                "url_hash": str(i),
                 "url": f"https://example.org/doc-{i}",
-                "title": f"Doc {i}",
-                "snippet": "Sample cached hit",
+                "title": f"Doc {i} neutron",
+                "snippet": "Neutron sample cached hit discussing search architecture.",
                 "score": 1.0,
                 "crawled_at": "2026-11-10 12:00:00",
             }
             for i in range(5)
         ]
         with patch.object(crawler_app_module.turso_crawler_client, "search", AsyncMock(return_value=cached)), \
+             patch.object(crawler_app_module.turso_crawler_client, "get_payloads_map", AsyncMock(return_value={})), \
              patch.object(crawler_app_module.turso_crawler_client, "record_hot_topic", AsyncMock()):
             with TestClient(crawler_app_module.app) as client:
                 res = client.get("/search?q=neutron")
@@ -686,6 +762,14 @@ class TestFastAPIEndpoints(unittest.TestCase):
                 data = res.json()
                 self.assertEqual(data["source"], "index_cache")
                 self.assertEqual(data["total"], 5)
+                self.assertIsNotNone(data.get("answer"))
+
+                res_api = client.get("/api/research?q=neutron&max_results=3&include_markdown=true")
+                self.assertEqual(res_api.status_code, 200)
+                api_data = res_api.json()
+                self.assertEqual(len(api_data["sources"]), 3)
+                self.assertIn("full_markdown", api_data["sources"][0])
+                self.assertIsNotNone(api_data.get("answer"))
 
     def test_internal_auth_enforcement(self):
         with TestClient(crawler_app_module.app) as client:
@@ -706,15 +790,16 @@ class TestFastAPIEndpoints(unittest.TestCase):
 
     def test_search_stream_emits_transparent_events(self):
         fake_hit = {
-            "url_hash": 12345,
+            "url_hash": "12345",
             "url": "https://example.org/quantum",
             "title": "Quantum Guide",
-            "snippet": "Quantum error correction overview",
+            "snippet": "Quantum error correction protects encoded quantum states from decoherence.",
+            "_full_text": "Quantum error correction protects encoded quantum states from decoherence using stabilizer codes.",
             "score": 0.85,
             "crawled_at": "2026-11-10 12:00:00",
         }
 
-        async def fake_discovery(query, max_urls=8, on_source_complete=None):
+        async def fake_discovery(query, max_urls=8, on_source_complete=None, **kwargs):
             if on_source_complete:
                 await on_source_complete({"source": "wikipedia", "url_count": 1, "duration_ms": 12})
             return ["https://example.org/quantum"], [{"source": "wikipedia", "url_count": 1, "duration_ms": 12}]
@@ -733,6 +818,7 @@ class TestFastAPIEndpoints(unittest.TestCase):
                 self.assertIn("event: discovery_result", body)
                 self.assertIn("event: crawl_success", body)
                 self.assertIn("event: live_result", body)
+                self.assertIn("event: answer", body)
                 self.assertIn("event: done", body)
 
     def test_large_64bit_url_hash_roundtrips_as_exact_string(self):
@@ -756,6 +842,7 @@ class TestFastAPIEndpoints(unittest.TestCase):
             "crawled_at": "2026-11-11 00:00:00",
         }
         with patch.object(crawler_app_module.turso_crawler_client, "search", AsyncMock(return_value=cached)), \
+             patch.object(crawler_app_module.turso_crawler_client, "get_payloads_map", AsyncMock(return_value={})), \
              patch.object(crawler_app_module.turso_crawler_client, "record_hot_topic", AsyncMock()), \
              patch.object(crawler_app_module.turso_crawler_client, "get_document_metadata", AsyncMock(return_value=meta_row)), \
              patch.object(crawler_app_module.turso_crawler_client, "get_document_payload", AsyncMock(return_value=compress_text("# Precision OK"))):

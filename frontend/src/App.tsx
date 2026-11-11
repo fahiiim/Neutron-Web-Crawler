@@ -1,13 +1,29 @@
 import { Globe, Lock, ShieldCheck, Zap } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AnswerCard } from './components/AnswerCard';
 import { CrawlProgressDrawer } from './components/CrawlProgressDrawer';
 import { DocumentModal } from './components/DocumentModal';
 import { Header } from './components/Header';
 import { ResultCard } from './components/ResultCard';
 import { SearchBar } from './components/SearchBar';
 import { StatsDrawer } from './components/StatsDrawer';
-import { CrawlItemStatus, DiscoveryMetric, SearchResult } from './types';
+import {
+  AnswerCitation,
+  CrawlItemStatus,
+  DiscoveryMetric,
+  GroundedAnswer,
+  SearchMode,
+  SearchResult,
+} from './types';
 import { safeHttpUrl } from './utils/format';
+
+const SEARCH_MODES: Array<{ id: SearchMode; label: string }> = [
+  { id: 'all', label: 'All Web' },
+  { id: 'encyclopedia', label: 'Encyclopedia' },
+  { id: 'papers', label: 'Papers' },
+  { id: 'code', label: 'Code' },
+  { id: 'discussions', label: 'Discussions' },
+];
 
 const CURATED_TOPICS = [
   'Quantum error correction',
@@ -21,9 +37,11 @@ const HISTORY_KEY = 'neutron_search_history';
 export function App() {
   const [queryInput, setQueryInput] = useState('');
   const [activeQuery, setActiveQuery] = useState('');
+  const [searchMode, setSearchMode] = useState<SearchMode>('all');
   const [hasSearched, setHasSearched] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [results, setResults] = useState<SearchResult[]>([]);
+  const [answer, setAnswer] = useState<GroundedAnswer | null>(null);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
 
   const [trendingChips, setTrendingChips] = useState<string[]>(CURATED_TOPICS);
@@ -79,9 +97,10 @@ export function App() {
   }, []);
 
   const executeSearch = useCallback(
-    (rawQuery: string) => {
+    (rawQuery: string, modeOverride?: SearchMode) => {
       const clean = rawQuery.trim();
       if (!clean) return;
+      const activeMode = modeOverride ?? searchMode;
 
       if (eventSourceRef.current) eventSourceRef.current.close();
       if (autoCollapseRef.current) window.clearTimeout(autoCollapseRef.current);
@@ -92,6 +111,7 @@ export function App() {
       setHasSearched(true);
       setIsSearching(true);
       setResults([]);
+      setAnswer(null);
       setLatencyMs(null);
       setFocusedCardIdx(-1);
       setShowTelemetry(false);
@@ -112,9 +132,14 @@ export function App() {
 
       const runFallback = async () => {
         try {
-          const res = await fetch(`/search?q=${encodeURIComponent(clean)}`);
+          const res = await fetch(
+            `/search?q=${encodeURIComponent(clean)}&mode=${encodeURIComponent(activeMode)}`
+          );
           if (res.ok) {
             const data = await res.json();
+            if (data.answer) {
+              setAnswer(data.answer);
+            }
             (data.results || []).forEach((item: SearchResult) =>
               addResult(item, data.source !== 'index_cache')
             );
@@ -128,7 +153,9 @@ export function App() {
       };
 
       try {
-        const es = new EventSource(`/search/stream?q=${encodeURIComponent(clean)}`);
+        const es = new EventSource(
+          `/search/stream?q=${encodeURIComponent(clean)}&mode=${encodeURIComponent(activeMode)}`
+        );
         eventSourceRef.current = es;
 
         es.addEventListener('cached_results', (ev) => {
@@ -200,6 +227,10 @@ export function App() {
           addResult(JSON.parse(ev.data), true);
         });
 
+        es.addEventListener('answer', (ev) => {
+          setAnswer(JSON.parse(ev.data));
+        });
+
         es.addEventListener('done', () => {
           setIsSearching(false);
           setLatencyMs(Math.round(performance.now() - t0));
@@ -222,8 +253,21 @@ export function App() {
         runFallback();
       }
     },
-    [persistHistory]
+    [persistHistory, searchMode]
   );
+
+  const handleOpenCitation = (cite: AnswerCitation) => {
+    const matchedIdx = results.findIndex((r) => String(r.url_hash) === String(cite.url_hash));
+    if (matchedIdx >= 0) {
+      setDeepDocHash(null);
+      setModalIdx(matchedIdx);
+      setModalOpen(true);
+    } else if (cite.url_hash) {
+      setDeepDocHash(String(cite.url_hash));
+      setModalIdx(-1);
+      setModalOpen(true);
+    }
+  };
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -272,6 +316,7 @@ export function App() {
     if (eventSourceRef.current) eventSourceRef.current.close();
     setHasSearched(false);
     setResults([]);
+    setAnswer(null);
     setActiveQuery('');
     setQueryInput('');
     setShowTelemetry(false);
@@ -318,7 +363,7 @@ export function App() {
               <SearchBar
                 query={queryInput}
                 onQueryChange={setQueryInput}
-                onSubmit={executeSearch}
+                onSubmit={(q) => executeSearch(q)}
                 recentSearches={recentSearches}
                 onClearRecent={() => {
                   localStorage.removeItem(HISTORY_KEY);
@@ -327,6 +372,24 @@ export function App() {
                 compact={false}
                 inputRef={inputRef}
               />
+
+              {/* Vertical Filter Pills */}
+              <div className="mt-4 flex items-center justify-center flex-wrap gap-1.5 font-mono text-[11px]">
+                {SEARCH_MODES.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setSearchMode(m.id)}
+                    className={`px-3 py-1 rounded-full border transition-colors ${
+                      searchMode === m.id
+                        ? 'bg-emerald-500/15 text-glow-green border-emerald-400/50'
+                        : 'border-white/15 text-white/75 hover:text-white hover:border-white/30'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
 
               {/* Prompt Chips */}
               <div className="mt-5 flex items-center justify-center flex-wrap gap-2 font-classic">
@@ -361,11 +424,11 @@ export function App() {
           </main>
         ) : (
           <main className="flex-1 w-full max-w-3xl mx-auto px-4 sm:px-6 py-6">
-            <div className="mb-5">
+            <div className="mb-3.5">
               <SearchBar
                 query={queryInput}
                 onQueryChange={setQueryInput}
-                onSubmit={executeSearch}
+                onSubmit={(q) => executeSearch(q)}
                 recentSearches={recentSearches}
                 onClearRecent={() => {
                   localStorage.removeItem(HISTORY_KEY);
@@ -374,6 +437,26 @@ export function App() {
                 compact={true}
                 inputRef={inputRef}
               />
+            </div>
+
+            <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar pb-3 mb-2 border-b border-white/[0.08] font-mono text-[11px]">
+              {SEARCH_MODES.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => {
+                    setSearchMode(m.id);
+                    executeSearch(activeQuery, m.id);
+                  }}
+                  className={`px-3 py-1 rounded-full border whitespace-nowrap transition-colors ${
+                    searchMode === m.id
+                      ? 'bg-emerald-500/15 text-glow-green border-emerald-400/50'
+                      : 'border-white/15 text-white/75 hover:text-white hover:border-white/30'
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
             </div>
 
             <div className="flex items-center justify-between text-xs font-mono text-white mb-3 px-0.5">
@@ -396,6 +479,10 @@ export function App() {
               crawlItems={crawlItems}
               isSearching={isSearching}
             />
+
+            {answer && (
+              <AnswerCard answer={answer} onOpenCitation={handleOpenCitation} />
+            )}
 
             {isSearching && results.length === 0 && (
               <div className="space-y-3" aria-hidden="true">

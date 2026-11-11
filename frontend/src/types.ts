@@ -1,3 +1,5 @@
+export type SearchMode = 'all' | 'encyclopedia' | 'papers' | 'code' | 'discussions';
+
 export interface SearchResult {
   url_hash: string;
   url: string;
@@ -6,6 +8,20 @@ export interface SearchResult {
   score?: number;
   crawled_at?: string | null;
   isLive?: boolean;
+}
+
+export interface AnswerCitation {
+  index: number;
+  title: string;
+  url: string;
+  url_hash: string;
+  domain: string;
+}
+
+export interface GroundedAnswer {
+  summary: string;
+  citations: AnswerCitation[];
+  mode: string;
 }
 
 export interface DiscoveryMetric {

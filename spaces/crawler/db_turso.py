@@ -278,6 +278,26 @@ class TursoCrawlerClient:
 
         return hits[:limit]
 
+    async def get_payloads_map(self, url_hashes: List[int]) -> Dict[int, bytes]:
+        """Batch-fetch compressed payloads for multiple url_hashes in one round-trip."""
+        client = await self._ensure_client()
+        if client is None or not url_hashes:
+            return {}
+
+        limited = url_hashes[:10]
+        placeholders = ",".join("?" for _ in limited)
+        sql = f"SELECT url_hash, compressed_text FROM page_payloads WHERE url_hash IN ({placeholders});"
+        out: Dict[int, bytes] = {}
+        try:
+            rs = await client.execute(sql, limited)
+            for row in rs.rows:
+                raw_bytes = row["compressed_text"]
+                if raw_bytes:
+                    out[int(row["url_hash"])] = bytes(raw_bytes)
+        except Exception as exc:
+            logger.warning("turso_payload_batch_read_failed", error=str(exc))
+        return out
+
     async def get_document_payload(self, url_hash: int) -> Optional[bytes]:
         """Fetch compressed markdown payload directly from Turso."""
         client = await self._ensure_client()
@@ -635,7 +655,7 @@ class TursoCrawlerClient:
             return 0
 
     async def lease_next_frontier_url(self) -> Optional[Dict[str, Any]]:
-        """Atomically lease the highest-priority pending URL from the crawl frontier."""
+        """Atomically lease a pending frontier URL interleaved across domains."""
         client = await self._ensure_client()
         if client is None:
             return None
@@ -644,10 +664,15 @@ class TursoCrawlerClient:
         UPDATE frontier_queue
         SET status = 1, lease_expires_at = DATETIME('now', '+5 minutes')
         WHERE url_hash = (
-            SELECT url_hash
-            FROM frontier_queue
-            WHERE status = 0
-            ORDER BY priority_score DESC, discovered_at ASC
+            SELECT f.url_hash
+            FROM frontier_queue f
+            LEFT JOIN domains d ON f.domain_hash = d.domain_hash
+            WHERE f.status = 0
+            ORDER BY
+                CASE WHEN d.next_fetch_at IS NULL OR d.next_fetch_at <= DATETIME('now') THEN 0 ELSE 1 END ASC,
+                f.priority_score DESC,
+                COALESCE(d.next_fetch_at, '1970-01-01') ASC,
+                f.discovered_at ASC
             LIMIT 1
         )
         RETURNING url_hash, domain_hash, url;
@@ -657,9 +682,17 @@ class TursoCrawlerClient:
             if not rs.rows:
                 return None
             row = rs.rows[0]
+            domain_hash = int(row["domain_hash"])
+            try:
+                await client.execute(
+                    "UPDATE domains SET next_fetch_at = DATETIME('now', '+15 seconds'), updated_at = DATETIME('now') WHERE domain_hash = ?;",
+                    [domain_hash],
+                )
+            except Exception:
+                pass
             return {
                 "url_hash": int(row["url_hash"]),
-                "domain_hash": int(row["domain_hash"]),
+                "domain_hash": domain_hash,
                 "url": str(row["url"]),
             }
         except Exception as exc:

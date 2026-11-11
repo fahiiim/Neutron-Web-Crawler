@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 import hmac
 import json
 import time
-from typing import Any, AsyncGenerator, Coroutine, Dict, List, Optional, Set
+from typing import Any, AsyncGenerator, Coroutine, Dict, List, Optional, Set, Tuple
 import urllib.parse
 
 try:
@@ -74,6 +74,7 @@ try:
     from .parser import is_waf_or_empty_page, parse_page_content
     from .robots import robots_manager
     from .sitemap import discover_sitemap_urls
+    from .synthesis import extract_query_focused_snippet, synthesize_grounded_answer
 except ImportError:
     from bloom import URLBloomFilter
     from compression import compress_text, decompress_text
@@ -92,6 +93,7 @@ except ImportError:
     from parser import is_waf_or_empty_page, parse_page_content
     from robots import robots_manager
     from sitemap import discover_sitemap_urls
+    from synthesis import extract_query_focused_snippet, synthesize_grounded_answer
 
 import os
 
@@ -124,7 +126,26 @@ url_bloom = URLBloomFilter(
 )
 _jit_semaphore = asyncio.Semaphore(max(1, settings.MAX_CONCURRENT_JIT_FETCHES))
 _seen_sitemap_domains: Set[str] = set()
+_waf_domain_cooldown: Dict[str, float] = {}
 _bg_worker_task: Optional[asyncio.Task] = None
+
+
+def _get_active_waf_domains() -> Set[str]:
+    """Return currently cooled-down anti-bot domains and prune expired entries."""
+    now = time.time()
+    expired = [d for d, exp in _waf_domain_cooldown.items() if exp <= now]
+    for d in expired:
+        _waf_domain_cooldown.pop(d, None)
+    return set(_waf_domain_cooldown.keys())
+
+
+def _mark_waf_domain(domain: str) -> None:
+    """Temporarily avoid wasting live JIT slots on hard WAF-blocking domains."""
+    if not domain or domain == "unknown":
+        return
+    if len(_waf_domain_cooldown) >= 2000:
+        _waf_domain_cooldown.clear()
+    _waf_domain_cooldown[domain] = time.time() + settings.WAF_COOLDOWN_SECONDS
 
 
 class JITCrawlRequest(BaseModel):
@@ -200,11 +221,12 @@ async def fetch_with_retry(
     session: AsyncSession,
     url: str,
     max_retries: int = settings.MAX_RETRY_ATTEMPTS,
+    base_timeout: float = settings.FETCH_TIMEOUT_SECONDS,
 ) -> Optional[Any]:
     """Fetch a URL with Chrome TLS impersonation and exponential backoff retries."""
     attempts = max(1, max_retries)
     for attempt in range(attempts):
-        timeout = settings.FETCH_TIMEOUT_SECONDS + (attempt * 1.5)
+        timeout = base_timeout + (attempt * 1.5)
         try:
             response = await session.get(url, timeout=timeout)
             if response.status_code == 200:
@@ -396,30 +418,114 @@ async def privacy_endpoint() -> str:
     )
 
 
-@app.get("/search")
-@limiter.limit(settings.RATE_LIMIT_SEARCH)
-async def search_endpoint(
-    request: Request,
-    q: str = Query(..., min_length=1, max_length=256, description="Search query string"),
-    limit: int = Query(15, ge=1, le=50),
+_MODE_DOMAINS: Dict[str, Tuple[str, ...]] = {
+    "encyclopedia": ("wikipedia.org", "britannica.com", "stanford.edu"),
+    "papers": ("arxiv.org", "acm.org", "ieee.org", "nature.com", "sciencedirect.com", "biorxiv.org"),
+    "code": ("github.com", "gitlab.com", "stackoverflow.com", "python.org", "rust-lang.org", "docs."),
+    "discussions": ("reddit.com", "ycombinator.com", "lobste.rs", "dev.to"),
+}
+
+
+def _filter_hits_by_mode(hits: List[Dict[str, Any]], mode: str) -> List[Dict[str, Any]]:
+    """Optionally narrow indexed cache hits to vertical domains when a filter mode is active."""
+    clean_mode = (mode or "all").lower()
+    suffixes = _MODE_DOMAINS.get(clean_mode)
+    if not suffixes:
+        return hits
+    filtered: List[Dict[str, Any]] = []
+    for item in hits:
+        host = extract_domain_host(str(item.get("url") or ""))
+        if any(s in host for s in suffixes):
+            filtered.append(item)
+    return filtered
+
+
+async def _attach_synthesis_and_excerpts(
+    query: str,
+    docs: List[Dict[str, Any]],
+    include_markdown: bool = False,
+) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Hydrate top docs from Turso payloads if needed, synthesize an answer, and format snippets."""
+    top_docs = docs[: settings.SYNTHESIS_MAX_SOURCES]
+    missing_hashes: List[int] = []
+    for doc in top_docs:
+        if not doc.get("_full_text"):
+            raw_hash = doc.get("url_hash")
+            try:
+                if raw_hash is not None:
+                    missing_hashes.append(int(raw_hash))
+            except (TypeError, ValueError):
+                continue
+
+    payloads_map: Dict[int, bytes] = {}
+    if missing_hashes:
+        payloads_map = await turso_crawler_client.get_payloads_map(missing_hashes)
+
+    synthesis_inputs: List[Dict[str, Any]] = []
+    for doc in top_docs:
+        full_txt = doc.get("_full_text") or ""
+        if not full_txt:
+            try:
+                raw_bytes = payloads_map.get(int(doc.get("url_hash", 0)))
+                if raw_bytes:
+                    full_txt = decompress_text(raw_bytes)
+            except (TypeError, ValueError):
+                full_txt = ""
+        synthesis_inputs.append(
+            {
+                "url_hash": str(doc.get("url_hash") or ""),
+                "url": doc.get("url") or "",
+                "title": doc.get("title") or "",
+                "raw_snippet": doc.get("snippet") or "",
+                "full_text": full_txt,
+            }
+        )
+
+    answer = synthesize_grounded_answer(query, synthesis_inputs, max_sentences=4)
+
+    formatted_docs: List[Dict[str, Any]] = []
+    payload_lookup = {s["url"]: s["full_text"] for s in synthesis_inputs}
+    for doc in docs:
+        clean_doc = {k: v for k, v in doc.items() if k != "_full_text"}
+        raw_snip = str(clean_doc.get("snippet") or "")
+        body_for_excerpt = str(doc.get("_full_text") or payload_lookup.get(clean_doc.get("url", ""), "") or raw_snip)
+        clean_doc["snippet"] = extract_query_focused_snippet(query, body_for_excerpt, max_len=320) or raw_snip[:320]
+        if include_markdown:
+            clean_doc["full_markdown"] = body_for_excerpt
+        formatted_docs.append(clean_doc)
+
+    return formatted_docs, answer
+
+
+async def _execute_unified_search(
+    clean_query: str,
+    limit: int = 15,
+    mode: str = "all",
+    include_markdown: bool = False,
 ) -> Dict[str, Any]:
-    """Execute unified search: Turso FTS5 BM25 index + rate-limited JIT crawl cascade."""
-    clean_query = q.strip()
-    if not clean_query:
-        return {"query": q, "total": 0, "results": []}
+    """Unified fast search pipeline shared by /search and /api/research."""
+    cached_raw = await turso_crawler_client.search(clean_query, limit=limit)
+    cached_hits = _filter_hits_by_mode(cached_raw, mode)
 
-    _fire_and_log(turso_crawler_client.record_hot_topic(clean_query), "record_hot_topic")
-
-    cached_hits = await turso_crawler_client.search(clean_query, limit=limit)
     if len(cached_hits) >= settings.JIT_CACHE_THRESHOLD:
+        formatted, answer = await _attach_synthesis_and_excerpts(
+            clean_query, cached_hits[:limit], include_markdown=include_markdown
+        )
         return {
             "query": clean_query,
+            "mode": mode,
             "source": "index_cache",
-            "total": len(cached_hits),
-            "results": cached_hits,
+            "total": len(formatted),
+            "answer": answer,
+            "results": formatted,
         }
 
-    candidates = await discover_seed_urls(clean_query, max_urls=8)
+    candidates = await discover_seed_urls(
+        clean_query,
+        max_urls=8,
+        mode=mode,
+        skip_domains=_get_active_waf_domains(),
+    )
     jit_hits: List[Dict[str, Any]] = []
 
     if candidates:
@@ -428,15 +534,30 @@ async def search_endpoint(
         if fetch_targets:
             async with AsyncSession(impersonate="chrome124") as session:
                 tasks = [
-                    fetch_and_index_document(
-                        session, url, check_robots=True, query=clean_query
+                    asyncio.create_task(
+                        fetch_and_index_document(
+                            session,
+                            url,
+                            check_robots=True,
+                            query=clean_query,
+                            fast_live=True,
+                            include_full_text=True,
+                        )
                     )
                     for url in fetch_targets
                 ]
-                outcomes = await asyncio.gather(*tasks, return_exceptions=True)
-                for item in outcomes:
-                    if isinstance(item, dict) and item:
-                        jit_hits.append(item)
+                done, pending = await asyncio.wait(
+                    tasks, timeout=settings.LIVE_JIT_DEADLINE_SECONDS
+                )
+                for p in pending:
+                    p.cancel()
+                for t in done:
+                    try:
+                        item = t.result()
+                        if isinstance(item, dict) and item:
+                            jit_hits.append(item)
+                    except Exception:
+                        continue
 
     seen_urls: Set[str] = set()
     merged: List[Dict[str, Any]] = []
@@ -459,11 +580,65 @@ async def search_endpoint(
         reverse=True,
     )
 
+    trimmed = merged[:limit]
+    formatted, answer = await _attach_synthesis_and_excerpts(
+        clean_query, trimmed, include_markdown=include_markdown
+    )
     return {
         "query": clean_query,
+        "mode": mode,
         "source": "hybrid_jit",
-        "total": len(merged),
-        "results": merged[:limit],
+        "total": len(formatted),
+        "answer": answer,
+        "results": formatted,
+    }
+
+
+@app.get("/search")
+@limiter.limit(settings.RATE_LIMIT_SEARCH)
+async def search_endpoint(
+    request: Request,
+    q: str = Query(..., min_length=1, max_length=256, description="Search query string"),
+    limit: int = Query(15, ge=1, le=50),
+    mode: str = Query("all", description="Vertical filter: all, encyclopedia, papers, code, discussions"),
+) -> Dict[str, Any]:
+    """Execute unified search: Turso FTS5 BM25 + fast live JIT crawl + answer synthesis."""
+    clean_query = q.strip()
+    if not clean_query:
+        return {"query": q, "total": 0, "answer": None, "results": []}
+
+    _fire_and_log(turso_crawler_client.record_hot_topic(clean_query), "record_hot_topic")
+    return await _execute_unified_search(clean_query, limit=limit, mode=mode, include_markdown=False)
+
+
+@app.get("/api/research")
+@limiter.limit(settings.RATE_LIMIT_RESEARCH)
+async def research_endpoint(
+    request: Request,
+    q: str = Query(..., min_length=1, max_length=256, description="Research query string"),
+    max_results: int = Query(5, ge=1, le=15),
+    include_markdown: bool = Query(True, description="Include extracted clean Markdown per source"),
+    mode: str = Query("all", description="Vertical filter: all, encyclopedia, papers, code, discussions"),
+) -> Dict[str, Any]:
+    """Developer & AI-Agent research API returning cited answers and clean Markdown."""
+    clean_query = q.strip()
+    if not clean_query:
+        return {"query": q, "total": 0, "answer": None, "sources": []}
+
+    _fire_and_log(turso_crawler_client.record_hot_topic(clean_query), "record_hot_topic")
+    payload = await _execute_unified_search(
+        clean_query,
+        limit=max_results,
+        mode=mode,
+        include_markdown=include_markdown,
+    )
+    return {
+        "query": payload["query"],
+        "mode": payload["mode"],
+        "source": payload["source"],
+        "answer": payload["answer"],
+        "total": payload["total"],
+        "sources": payload["results"],
     }
 
 
@@ -472,23 +647,30 @@ async def search_endpoint(
 async def search_stream(
     request: Request,
     q: str = Query(..., min_length=1, max_length=256, description="Search query"),
+    mode: str = Query("all", description="Vertical filter: all, encyclopedia, papers, code, discussions"),
 ) -> Any:
-    """Stream search results and live crawl telemetry via Server-Sent Events (SSE)."""
+    """Stream search results, crawl telemetry, and cited answer synthesis via SSE."""
     clean_query = q.strip()
     _fire_and_log(turso_crawler_client.record_hot_topic(clean_query), "record_hot_topic")
 
     async def event_generator() -> AsyncGenerator[Dict[str, str], None]:
         t_start = time.perf_counter()
-        cached_hits = await turso_crawler_client.search(clean_query, limit=10)
+        raw_cached = await turso_crawler_client.search(clean_query, limit=10)
+        cached_hits = _filter_hits_by_mode(raw_cached, mode)
         index_ms = round((time.perf_counter() - t_start) * 1000)
+
+        formatted_cached, _ = await _attach_synthesis_and_excerpts(
+            clean_query, cached_hits, include_markdown=False
+        )
+        collected_docs: List[Dict[str, Any]] = list(cached_hits)
 
         yield {
             "event": "cached_results",
             "data": json.dumps(
                 {
-                    "count": len(cached_hits),
+                    "count": len(formatted_cached),
                     "duration_ms": index_ms,
-                    "results": cached_hits,
+                    "results": formatted_cached,
                 }
             ),
         }
@@ -505,7 +687,7 @@ async def search_stream(
             yield {
                 "event": "status",
                 "data": json.dumps(
-                    {"message": "Discovering live web sources across 6 search adapters..."}
+                    {"message": "Discovering live web sources across search adapters..."}
                 ),
             }
 
@@ -516,7 +698,11 @@ async def search_stream(
 
             discovery_task = asyncio.create_task(
                 discover_seed_urls_detailed(
-                    clean_query, max_urls=8, on_source_complete=_on_source
+                    clean_query,
+                    max_urls=8,
+                    on_source_complete=_on_source,
+                    mode=mode,
+                    skip_domains=_get_active_waf_domains(),
                 )
             )
 
@@ -574,23 +760,38 @@ async def search_stream(
                             return
 
                         doc = await fetch_and_index_document(
-                            session, target_url, check_robots=False, query=clean_query
+                            session,
+                            target_url,
+                            check_robots=False,
+                            query=clean_query,
+                            fast_live=True,
+                            include_full_text=True,
                         )
                         dur_ms = round((time.perf_counter() - t0) * 1000)
                         if doc:
+                            collected_docs.append(doc)
+                            public_doc = {k: v for k, v in doc.items() if k != "_full_text"}
+                            public_doc["snippet"] = (
+                                extract_query_focused_snippet(
+                                    clean_query,
+                                    doc.get("_full_text") or str(public_doc.get("snippet") or ""),
+                                    max_len=320,
+                                )
+                                or str(public_doc.get("snippet") or "")[:320]
+                            )
                             await crawl_events.put(
                                 {
                                     "event": "crawl_success",
                                     "data": {
                                         "url": target_url,
                                         "domain": domain,
-                                        "title": doc.get("title", domain),
+                                        "title": public_doc.get("title", domain),
                                         "duration_ms": dur_ms,
                                     },
                                 }
                             )
                             await crawl_events.put(
-                                {"event": "live_result", "data": doc}
+                                {"event": "live_result", "data": public_doc}
                             )
                         else:
                             await crawl_events.put(
@@ -599,7 +800,7 @@ async def search_stream(
                                     "data": {
                                         "url": target_url,
                                         "domain": domain,
-                                        "error": "blocked, empty, or duplicate",
+                                        "error": "blocked, empty, or off-topic",
                                     },
                                 }
                             )
@@ -621,12 +822,18 @@ async def search_stream(
                         for url in crawl_targets
                     ]
                     gather_future = asyncio.gather(*crawl_tasks, return_exceptions=True)
+                    deadline = time.monotonic() + settings.LIVE_JIT_DEADLINE_SECONDS
 
                     while not gather_future.done() or not crawl_events.empty():
                         if await request.is_disconnected():
                             for t in crawl_tasks:
                                 t.cancel()
                             return
+                        if time.monotonic() >= deadline and not gather_future.done():
+                            for t in crawl_tasks:
+                                if not t.done():
+                                    t.cancel()
+                            break
                         try:
                             ev = await asyncio.wait_for(crawl_events.get(), timeout=0.1)
                             yield {
@@ -636,7 +843,20 @@ async def search_stream(
                         except asyncio.TimeoutError:
                             continue
 
-                    await gather_future
+                    while not crawl_events.empty():
+                        ev = crawl_events.get_nowait()
+                        yield {
+                            "event": ev["event"],
+                            "data": json.dumps(ev["data"]),
+                        }
+
+        # Emit synthesized cited answer across collected hits
+        if collected_docs and not await request.is_disconnected():
+            _, answer = await _attach_synthesis_and_excerpts(
+                clean_query, collected_docs, include_markdown=False
+            )
+            if answer:
+                yield {"event": "answer", "data": json.dumps(answer)}
 
         yield {"event": "done", "data": json.dumps({"completed": True})}
 
@@ -685,10 +905,17 @@ async def fetch_and_index_document(
     check_robots: bool = True,
     skip_if_seen: bool = False,
     query: Optional[str] = None,
+    fast_live: bool = False,
+    include_full_text: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Fetch URL with TLS impersonation, retry, dedup, parse, and index."""
     canonical = canonicalize_url(url) or url
+    domain_host = extract_domain_host(canonical)
     try:
+        if fast_live and domain_host in _get_active_waf_domains():
+            logger.debug("waf_cooldown_skipped", url=canonical, domain=domain_host)
+            return None
+
         if skip_if_seen and url_bloom.might_contain(canonical):
             logger.debug("bloom_skip_known_url", url=canonical)
             return None
@@ -700,9 +927,22 @@ async def fetch_and_index_document(
                 return None
 
         extracted = None
+        req_timeout = (
+            settings.LIVE_FETCH_TIMEOUT_SECONDS
+            if fast_live
+            else settings.FETCH_TIMEOUT_SECONDS
+        )
+        req_retries = (
+            settings.LIVE_MAX_RETRIES if fast_live else settings.MAX_RETRY_ATTEMPTS
+        )
+        rend_timeout = (
+            settings.LIVE_RENDER_TIMEOUT_SECONDS if fast_live else 8.0
+        )
 
         async with _jit_semaphore:
-            response = await fetch_with_retry(session, canonical)
+            response = await fetch_with_retry(
+                session, canonical, max_retries=req_retries, base_timeout=req_timeout
+            )
             if response is not None and response.status_code == 200:
                 content_type = response.headers.get("content-type", "")
                 if "text/html" in content_type or "application/xhtml" in content_type:
@@ -717,7 +957,7 @@ async def fetch_and_index_document(
                 and settings.INTERNAL_API_KEY
             ):
                 try:
-                    async with httpx.AsyncClient(timeout=8.0) as client:
+                    async with httpx.AsyncClient(timeout=rend_timeout) as client:
                         rend_resp = await client.post(
                             f"{settings.RENDERER_SERVICE_URL.rstrip('/')}/render",
                             json={"url": canonical},
@@ -734,6 +974,8 @@ async def fetch_and_index_document(
                                     "text": rendered.get("text", ""),
                                     "links": rendered.get("links", []),
                                 }
+                        elif rend_resp.status_code == 422:
+                            _mark_waf_domain(domain_host)
                 except Exception as exc:
                     logger.warning(
                         "renderer_escalation_failed",
@@ -746,6 +988,7 @@ async def fetch_and_index_document(
             or not extracted.get("text")
             or is_waf_or_empty_page(extracted.get("title", ""), extracted.get("text", ""))
         ):
+            _mark_waf_domain(domain_host)
             logger.info("waf_or_empty_skipped", url=canonical)
             return None
 
@@ -817,7 +1060,7 @@ async def fetch_and_index_document(
                     "enqueue_frontier_urls",
                 )
 
-        return {
+        out_doc: Dict[str, Any] = {
             "url_hash": str(url_id),
             "url": canonical,
             "title": extracted["title"],
@@ -825,6 +1068,9 @@ async def fetch_and_index_document(
             "score": round(opic_score + relevance_boost, 4),
             "crawled_at": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
         }
+        if include_full_text:
+            out_doc["_full_text"] = extracted["text"]
+        return out_doc
     except Exception as exc:
         logger.error("fetch_and_index_error", url=canonical, error=str(exc), exc_info=True)
         return None

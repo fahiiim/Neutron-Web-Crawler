@@ -201,7 +201,7 @@ def _is_nav_noise(text: str) -> bool:
 def extract_lead_prose_from_blocks(
     text_blocks: List[str],
     title: str = "",
-    max_len: int = 450,
+    max_len: int = 1200,
 ) -> str:
     """Pick clean opening prose paragraphs while skipping headings, bullets, and nav noise."""
     norm_title = " ".join((title or "").lower().split())
@@ -222,7 +222,7 @@ def extract_lead_prose_from_blocks(
                 continue
             chosen.append(clean)
             total_len += len(clean) + 1
-            if len(chosen) >= 2 or total_len >= max_len:
+            if len(chosen) >= 6 or total_len >= max_len:
                 break
         return " ".join(chosen)[:max_len].strip()
 
@@ -373,8 +373,8 @@ def parse_page_content(html: str, base_url: str) -> Dict[str, Any]:
         full_text = f"# {title}\n\n{json_ld['article_body']}"
 
     lead_prose = (
-        extract_lead_prose_from_blocks(prose_candidates, title=title, max_len=450)
-        or extract_lead_prose_from_blocks(text_blocks, title=title, max_len=450)
+        extract_lead_prose_from_blocks(prose_candidates, title=title, max_len=1200)
+        or extract_lead_prose_from_blocks(text_blocks, title=title, max_len=1200)
     )
     clean_meta_desc = " ".join((snippet or "").split())
     if clean_meta_desc and _is_nav_noise(clean_meta_desc):
@@ -382,17 +382,18 @@ def parse_page_content(html: str, base_url: str) -> Dict[str, Any]:
     if clean_meta_desc and clean_meta_desc.lower() == title.lower():
         clean_meta_desc = ""
 
+    # Combine meta description + multi-paragraph opening prose for deeper FTS5 recall
     if clean_meta_desc and lead_prose:
-        if len(clean_meta_desc) < 180 and clean_meta_desc[:40].lower() not in lead_prose.lower():
-            snippet = f"{clean_meta_desc} — {lead_prose}"[:450]
+        if clean_meta_desc[:40].lower() not in lead_prose.lower():
+            snippet = f"{clean_meta_desc} — {lead_prose}"[:1200]
         else:
-            snippet = clean_meta_desc[:450]
+            snippet = lead_prose[:1200]
     elif clean_meta_desc:
-        snippet = clean_meta_desc[:450]
+        snippet = clean_meta_desc[:1200]
     elif lead_prose:
-        snippet = lead_prose[:450]
+        snippet = lead_prose[:1200]
     elif text_blocks:
-        snippet = text_blocks[0].lstrip("#>- ").strip()[:300]
+        snippet = text_blocks[0].lstrip("#>- ").strip()[:600]
 
     is_waf_blocked = is_waf_or_empty_page(title, full_text)
     is_spa_empty = (len(full_text) < 150 and bool(
@@ -401,7 +402,7 @@ def parse_page_content(html: str, base_url: str) -> Dict[str, Any]:
 
     return {
         "title": title[:200],
-        "snippet": snippet[:450] if snippet else full_text[:450],
+        "snippet": snippet[:1200] if snippet else full_text[:1200],
         "text": full_text,
         "is_spa_empty": is_spa_empty,
         "is_waf_blocked": is_waf_blocked,

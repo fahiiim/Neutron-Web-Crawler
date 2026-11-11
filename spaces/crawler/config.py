@@ -51,8 +51,17 @@ class CrawlerSettings(BaseSettings):
     JIT_CACHE_THRESHOLD: int = 5
     MAX_RETRY_ATTEMPTS: int = 3
     FETCH_TIMEOUT_SECONDS: float = 6.0
+    LIVE_MAX_RETRIES: int = 1
+    LIVE_FETCH_TIMEOUT_SECONDS: float = 3.0
+    LIVE_JIT_DEADLINE_SECONDS: float = 4.8
+    LIVE_RENDER_TIMEOUT_SECONDS: float = 4.5
+    WAF_COOLDOWN_SECONDS: int = 86400
+    SYNTHESIS_MAX_SOURCES: int = 5
     SIMHASH_HAMMING_THRESHOLD: int = 3
     FRESHNESS_TTL_DAYS: int = 7
+
+    # Rate limit for /api/research endpoint
+    RATE_LIMIT_RESEARCH: str = "20/minute"
 
     # Bloom Filter Configuration
     BLOOM_CAPACITY: int = 1_000_000

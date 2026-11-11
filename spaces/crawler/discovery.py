@@ -265,25 +265,38 @@ async def _timed_adapter(
     }
 
 
+_MODE_ADAPTERS: Dict[str, Set[str]] = {
+    "all": {"brave", "duckduckgo", "wikipedia", "hackernews", "reddit", "arxiv", "github"},
+    "encyclopedia": {"brave", "wikipedia", "duckduckgo"},
+    "papers": {"brave", "arxiv", "wikipedia", "duckduckgo"},
+    "code": {"brave", "github", "hackernews", "duckduckgo"},
+    "discussions": {"brave", "reddit", "hackernews", "duckduckgo"},
+}
+
+
 async def discover_seed_urls_detailed(
     query: str,
     max_urls: int = 12,
     on_source_complete: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+    mode: str = "all",
+    skip_domains: Optional[Set[str]] = None,
 ) -> Tuple[List[str], List[Dict[str, Any]]]:
-    """Run all discovery adapters concurrently and return diverse URLs + telemetry."""
+    """Run selected discovery adapters concurrently and return diverse URLs + telemetry."""
     headers = {
         "User-Agent": _pick_user_agent(),
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
     }
 
+    allowed_sources = _MODE_ADAPTERS.get((mode or "all").lower(), _MODE_ADAPTERS["all"])
+    blocked_domains = skip_domains or set()
     discovered: List[str] = []
     metrics: List[Dict[str, Any]] = []
 
     async with httpx.AsyncClient(
-        headers=headers, timeout=5.5, follow_redirects=True
+        headers=headers, timeout=4.5, follow_redirects=True
     ) as client:
-        adapters: List[Tuple[str, Awaitable[List[str]]]] = [
+        all_adapters: List[Tuple[str, Awaitable[List[str]]]] = [
             ("duckduckgo", _discover_duckduckgo_html(client, query)),
             ("wikipedia", _discover_wikipedia_fulltext(client, query)),
             ("hackernews", _discover_hackernews(client, query)),
@@ -292,12 +305,14 @@ async def discover_seed_urls_detailed(
             ("github", _discover_github(client, query)),
         ]
         if settings.BRAVE_SEARCH_API_KEY:
-            adapters.append(("brave", _discover_brave(client, query)))
+            all_adapters.append(("brave", _discover_brave(client, query)))
 
-        tasks = [
-            asyncio.create_task(_timed_adapter(name, coro))
-            for name, coro in adapters
-        ]
+        tasks = []
+        for name, coro in all_adapters:
+            if name in allowed_sources:
+                tasks.append(asyncio.create_task(_timed_adapter(name, coro)))
+            elif hasattr(coro, "close"):
+                coro.close()
 
         # Prioritize DDG and Wikipedia URLs first once collected, while streaming progress
         by_source: Dict[str, List[str]] = {}
@@ -338,8 +353,11 @@ async def discover_seed_urls_detailed(
         url_path = urllib.parse.urlsplit(canonical).path.lower()
         if url_path.endswith(IGNORED_EXTENSIONS):
             continue
+        domain = extract_domain_host(canonical)
+        if domain in blocked_domains:
+            continue
         seen_urls.add(canonical)
-        candidates_clean.append((canonical, extract_domain_host(canonical)))
+        candidates_clean.append((canonical, domain))
 
     # Pass 1: maximize domain diversity (1 URL per domain)
     for canonical, domain in candidates_clean:
@@ -365,7 +383,14 @@ async def discover_seed_urls_detailed(
     return diverse_urls, metrics
 
 
-async def discover_seed_urls(query: str, max_urls: int = 12) -> List[str]:
+async def discover_seed_urls(
+    query: str,
+    max_urls: int = 12,
+    mode: str = "all",
+    skip_domains: Optional[Set[str]] = None,
+) -> List[str]:
     """Discover diverse candidate seed URLs across web, encyclopedia, tech, and paper sources."""
-    urls, _ = await discover_seed_urls_detailed(query, max_urls=max_urls)
+    urls, _ = await discover_seed_urls_detailed(
+        query, max_urls=max_urls, mode=mode, skip_domains=skip_domains
+    )
     return urls
