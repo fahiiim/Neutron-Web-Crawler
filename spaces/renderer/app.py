@@ -87,6 +87,45 @@ def verify_internal_auth(
         raise HTTPException(status_code=403, detail="Invalid internal API key")
 
 
+_WAF_EXACT_TITLES = {
+    "just a moment...",
+    "just a moment",
+    "attention required! | cloudflare",
+    "please wait... | cloudflare",
+    "access denied",
+    "403 forbidden",
+    "404 not found",
+    "pardon our interruption",
+    "are you a robot?",
+    "robot or human?",
+    "verify you are human",
+    "checking your browser",
+    "ddos-guard",
+}
+
+_WAF_BODY_MARKERS = (
+    "performing security verification",
+    "enable javascript and cookies to continue",
+    "checking if the site connection is secure",
+    "why have i been blocked",
+    "cloudflare ray id",
+    "you don't have permission to access",
+    "pardon our interruption",
+)
+
+
+def _is_waf_or_empty(title: str, text: str) -> bool:
+    """Reject anti-bot challenge pages and near-empty DOM extractions."""
+    clean_text = (text or "").strip()
+    if len(clean_text) < 50:
+        return True
+    low_title = " ".join((title or "").lower().split())
+    if low_title in _WAF_EXACT_TITLES or low_title.startswith(("just a moment", "attention required! | cloudflare", "error 1020")):
+        return True
+    low_text = clean_text.lower()
+    return len(clean_text) < 2000 and any(marker in low_text for marker in _WAF_BODY_MARKERS)
+
+
 def _extract_clean_text(html: str) -> str:
     """Strip chrome/navigation elements and extract clean Markdown-like text blocks."""
     tree = LexborHTMLParser(html)
@@ -245,6 +284,12 @@ async def render_page_endpoint(request: RenderRequest) -> Dict[str, Any]:
                 raw_text = await page.inner_text("body")
                 clean_text = " ".join(raw_text.split())
 
+            if _is_waf_or_empty(title, clean_text):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Blocked by upstream anti-bot interstitial or empty page",
+                )
+
             snippet = clean_text.lstrip("#>- ").strip()[:300] if clean_text else ""
 
             return {
@@ -253,6 +298,8 @@ async def render_page_endpoint(request: RenderRequest) -> Dict[str, Any]:
                 "snippet": snippet,
                 "text": clean_text[:12000],
             }
+        except HTTPException:
+            raise
         except Exception as exc:
             logger.warning("render_failed", url=request.url, error=str(exc))
             raise HTTPException(status_code=500, detail=f"Rendering error: {exc}")

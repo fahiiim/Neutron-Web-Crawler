@@ -14,14 +14,40 @@ logger = structlog.get_logger("neutron.gateway.db")
 
 _FTS5_RESERVED = {"and", "or", "not", "near"}
 
+_STOP_WORDS = {
+    "a", "about", "above", "after", "again", "against", "all", "also", "am", "an",
+    "and", "any", "are", "as", "at", "be", "because", "been", "before", "being",
+    "below", "between", "both", "but", "by", "can", "could", "did", "do", "does",
+    "doing", "down", "during", "each", "few", "for", "from", "further", "get", "go",
+    "had", "has", "have", "having", "he", "her", "here", "hers", "herself", "him",
+    "himself", "his", "how", "i", "if", "in", "into", "is", "it", "its", "itself",
+    "just", "like", "me", "more", "most", "my", "myself", "no", "nor", "not", "of",
+    "off", "on", "once", "only", "or", "other", "our", "ours", "ourselves", "out",
+    "over", "own", "same", "she", "should", "so", "some", "such", "than", "that",
+    "the", "their", "theirs", "them", "themselves", "then", "there", "these", "they",
+    "this", "those", "through", "to", "too", "under", "until", "up", "very", "was",
+    "we", "were", "what", "when", "where", "which", "while", "who", "whom", "why",
+    "will", "with", "would", "you", "your", "yours", "yourself", "yourselves",
+}
+
+_QUESTION_PREFIX_RE = re.compile(
+    r"^(what\s+is\s+(the\s+)?(name\s+of\s+)?|who\s+is\s+(the\s+)?|"
+    r"tell\s+me\s+about\s+|can\s+you\s+find\s+|how\s+to\s+|which\s+is\s+)",
+    flags=re.IGNORECASE,
+)
+
 
 def _sanitize_terms(query: str) -> List[str]:
-    tokens = re.findall(r"[a-zA-Z0-9]+", (query or "").lower())
+    stripped = _QUESTION_PREFIX_RE.sub("", (query or "").strip()).strip()
+    source_text = stripped if stripped else (query or "")
+    tokens = re.findall(r"[a-zA-Z0-9]+", source_text.lower())
     if not tokens:
         return []
     multi = [t for t in tokens if len(t) > 1]
     base = multi if multi else tokens
-    clean = [t for t in base if t not in _FTS5_RESERVED] or base
+    clean = [
+        t for t in base if t not in _STOP_WORDS and t not in _FTS5_RESERVED
+    ] or [t for t in base if t not in _FTS5_RESERVED] or base
     seen = set()
     out: List[str] = []
     for t in clean:
@@ -104,7 +130,7 @@ class TursoSearchClient:
                 )
                 results.append(
                     {
-                        "url_hash": row["url_hash"],
+                        "url_hash": str(row["url_hash"]),
                         "url": row["canonical_url"],
                         "title": row["title"],
                         "snippet": row["snippet"],
@@ -163,7 +189,7 @@ class TursoSearchClient:
             if rs.rows:
                 row = rs.rows[0]
                 return {
-                    "url_hash": row["url_hash"],
+                    "url_hash": str(row["url_hash"]),
                     "url": row["canonical_url"],
                     "title": row["title"],
                     "snippet": row["snippet"],

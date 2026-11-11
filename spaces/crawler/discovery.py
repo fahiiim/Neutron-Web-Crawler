@@ -18,10 +18,12 @@ try:
     from .config import settings
     from .dedup import canonicalize_url, extract_domain_host
     from .logging_utils import get_logger
+    from .parser import IGNORED_EXTENSIONS
 except ImportError:
     from config import settings
     from dedup import canonicalize_url, extract_domain_host
     from logging_utils import get_logger
+    from parser import IGNORED_EXTENSIONS
 
 logger = get_logger("neutron.discovery")
 
@@ -329,6 +331,9 @@ async def discover_seed_urls_detailed(
     for raw_url in discovered:
         canonical = canonicalize_url(raw_url)
         if not canonical:
+            continue
+        url_path = urllib.parse.urlsplit(canonical).path.lower()
+        if url_path.endswith(IGNORED_EXTENSIONS):
             continue
         domain = extract_domain_host(canonical)
         if domain not in seen_domains:

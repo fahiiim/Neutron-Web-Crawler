@@ -71,7 +71,7 @@ try:
     from .discovery import discover_seed_urls, discover_seed_urls_detailed
     from .logging_utils import get_logger
     from .middleware import configure_middleware, limiter
-    from .parser import parse_page_content
+    from .parser import is_waf_or_empty_page, parse_page_content
     from .robots import robots_manager
     from .sitemap import discover_sitemap_urls
 except ImportError:
@@ -89,7 +89,7 @@ except ImportError:
     from discovery import discover_seed_urls, discover_seed_urls_detailed
     from logging_utils import get_logger
     from middleware import configure_middleware, limiter
-    from parser import parse_page_content
+    from parser import is_waf_or_empty_page, parse_page_content
     from robots import robots_manager
     from sitemap import discover_sitemap_urls
 
@@ -584,7 +584,7 @@ async def search_stream(
                                     "data": {
                                         "url": target_url,
                                         "domain": domain,
-                                        "error": "empty or duplicate",
+                                        "error": "blocked, empty, or duplicate",
                                     },
                                 }
                             )
@@ -640,7 +640,7 @@ async def get_document(url_hash: int) -> Dict[str, Any]:
         full_markdown = decompress_text(payload_bytes)
         if full_markdown:
             return {
-                "url_hash": url_hash,
+                "url_hash": str(url_hash),
                 "url": meta.get("url") if meta else None,
                 "title": meta.get("title") if meta else None,
                 "crawled_at": meta.get("crawled_at") if meta else None,
@@ -652,7 +652,7 @@ async def get_document(url_hash: int) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail="Document not found")
 
     return {
-        "url_hash": url_hash,
+        "url_hash": str(url_hash),
         "url": meta.get("url"),
         "title": meta.get("title"),
         "crawled_at": meta.get("crawled_at"),
@@ -691,7 +691,7 @@ async def fetch_and_index_document(
                 content_type = response.headers.get("content-type", "")
                 if "text/html" in content_type or "application/xhtml" in content_type:
                     parsed = parse_page_content(response.text, canonical)
-                    if not parsed.get("is_spa_empty"):
+                    if not parsed.get("is_spa_empty") and not parsed.get("is_waf_blocked"):
                         extracted = parsed
 
             # Stage 3 Escalation: Headless Playwright Renderer for dynamic SPAs / WAF challenges
@@ -725,7 +725,12 @@ async def fetch_and_index_document(
                         error=str(exc),
                     )
 
-        if not extracted or not extracted.get("text"):
+        if (
+            not extracted
+            or not extracted.get("text")
+            or is_waf_or_empty_page(extracted.get("title", ""), extracted.get("text", ""))
+        ):
+            logger.info("waf_or_empty_skipped", url=canonical)
             return None
 
         url_id = hash_url(canonical)
@@ -784,7 +789,7 @@ async def fetch_and_index_document(
                 )
 
         return {
-            "url_hash": url_id,
+            "url_hash": str(url_id),
             "url": canonical,
             "title": extracted["title"],
             "snippet": extracted["snippet"],

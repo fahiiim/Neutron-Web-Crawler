@@ -45,6 +45,67 @@ _JUNK_SELECTORS = (
     ".cookie-banner, .cookie-consent, .advertisement, .ads, .sidebar"
 )
 
+_WAF_EXACT_TITLES = {
+    "just a moment...",
+    "just a moment",
+    "attention required! | cloudflare",
+    "please wait... | cloudflare",
+    "access denied",
+    "403 forbidden",
+    "404 not found",
+    "error 403",
+    "error 1020",
+    "pardon our interruption",
+    "are you a robot?",
+    "robot or human?",
+    "verify you are human",
+    "checking your browser",
+    "ddos-guard",
+}
+
+_WAF_PREFIX_TITLES = (
+    "just a moment",
+    "attention required! | cloudflare",
+    "access denied |",
+    "error 1020",
+    "error 1015",
+    "please wait...",
+)
+
+_WAF_BODY_MARKERS = (
+    "performing security verification",
+    "enable javascript and cookies to continue",
+    "checking if the site connection is secure",
+    "why have i been blocked",
+    "action you just performed triggered the security solution",
+    "cloudflare ray id",
+    "ddos protection by cloudflare",
+    "you don't have permission to access",
+    "pardon our interruption",
+    "please verify you are a human",
+    "verify you are human by completing the action below",
+)
+
+
+def is_waf_or_empty_page(title: str, text: str) -> bool:
+    """Detect Cloudflare/Akamai/bot-challenge interstitials and near-empty shells."""
+    clean_text = (text or "").strip()
+    if len(clean_text) < 50:
+        return True
+
+    low_title = " ".join((title or "").lower().split())
+    if low_title in _WAF_EXACT_TITLES or low_title.startswith(_WAF_PREFIX_TITLES):
+        return True
+
+    if low_title == "untitled document" and len(clean_text) < 200:
+        return True
+
+    low_text = clean_text.lower()
+    if len(clean_text) < 2000 and any(marker in low_text for marker in _WAF_BODY_MARKERS):
+        return True
+
+    return False
+
 
 def extract_outbound_links(tree: HTMLParser, base_url: str) -> List[Dict[str, Any]]:
     """Extract and canonicalize followable outbound hyperlink references."""
@@ -175,13 +236,15 @@ def parse_page_content(html: str, base_url: str) -> Dict[str, Any]:
         except Exception:
             pass
 
-    # 2. Extract standard semantic HTML + OpenGraph + JSON-LD metadata
+    # 2. Extract standard semantic HTML + OpenGraph + JSON-LD + H1 metadata
     title_node = tree.css_first("title")
     og_title_node = tree.css_first('meta[property="og:title"]')
+    h1_node = tree.css_first("h1")
     title = (
         (title_node.text().strip() if title_node else "")
         or (og_title_node.attributes.get("content", "").strip() if og_title_node else "")
         or (str(json_ld["title"]).strip() if json_ld.get("title") else "")
+        or (h1_node.text(strip=True) if h1_node else "")
         or "Untitled Document"
     )
 
@@ -232,15 +295,17 @@ def parse_page_content(html: str, base_url: str) -> Dict[str, Any]:
     if not snippet and text_blocks:
         snippet = text_blocks[0].lstrip("#>- ").strip()[:300]
 
-    is_spa_empty = len(full_text) < 150 and bool(
+    is_waf_blocked = is_waf_or_empty_page(title, full_text)
+    is_spa_empty = (len(full_text) < 150 and bool(
         tree.css_first("#root, #app, #__next")
-    )
+    ))
 
     return {
         "title": title[:200],
         "snippet": snippet[:400] if snippet else full_text[:400],
         "text": full_text,
         "is_spa_empty": is_spa_empty,
+        "is_waf_blocked": is_waf_blocked,
         "links": links,
         "language": language,
         "author": json_ld.get("author"),

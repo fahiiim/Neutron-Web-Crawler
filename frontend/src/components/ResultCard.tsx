@@ -12,7 +12,6 @@ import {
 interface ResultCardProps {
   item: SearchResult;
   query: string;
-  index: number;
   focused: boolean;
   onOpenReader: () => void;
 }
@@ -47,7 +46,6 @@ function HighlightedSnippet({ text, query }: { text: string; query: string }) {
 export function ResultCard({
   item,
   query,
-  index,
   focused,
   onOpenReader,
 }: ResultCardProps) {
@@ -71,8 +69,7 @@ export function ResultCard({
   return (
     <li
       role="listitem"
-      style={{ animationDelay: `${Math.min(index * 55, 360)}ms` }}
-      className={`animate-result-in surface-interactive rounded-xl p-4 sm:p-5 ${
+      className={`surface-interactive rounded-xl p-4 sm:p-5 ${
         focused ? 'border-emerald-400/70 ring-1 ring-emerald-400/25' : ''
       }`}
     >

@@ -1,5 +1,5 @@
 export interface SearchResult {
-  url_hash: number;
+  url_hash: string;
   url: string;
   title: string;
   snippet: string;

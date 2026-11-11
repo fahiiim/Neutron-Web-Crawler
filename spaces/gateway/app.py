@@ -21,6 +21,7 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sse_starlette.sse import EventSourceResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 import structlog
 
 try:
@@ -102,6 +103,15 @@ async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONR
     )
 
 
+class _PrivacySecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault("Permissions-Policy", "interest-cohort=()")
+        return response
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -109,6 +119,7 @@ app.add_middleware(
     allow_methods=["GET", "OPTIONS"],
     allow_headers=["*"],
 )
+app.add_middleware(_PrivacySecurityHeadersMiddleware)
 if os.path.isdir(_UI_ASSETS_DIR):
     app.mount("/ui-assets", StaticFiles(directory=_UI_ASSETS_DIR), name="ui-assets")
 
@@ -286,7 +297,7 @@ async def get_document(url_hash: int) -> Dict[str, Any]:
         full_markdown = decompress_text(payload_bytes)
         if full_markdown:
             return {
-                "url_hash": url_hash,
+                "url_hash": str(url_hash),
                 "url": meta.get("url") if meta else None,
                 "title": meta.get("title") if meta else None,
                 "crawled_at": meta.get("crawled_at") if meta else None,
@@ -298,7 +309,7 @@ async def get_document(url_hash: int) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail="Document not found")
 
     return {
-        "url_hash": url_hash,
+        "url_hash": str(url_hash),
         "url": meta.get("url"),
         "title": meta.get("title"),
         "crawled_at": meta.get("crawled_at"),

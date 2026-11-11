@@ -37,7 +37,7 @@ interface TocEntry {
 
 interface DocumentModalProps {
   open: boolean;
-  urlHash: number | string | null;
+  urlHash: string | null;
   initialTitle: string;
   initialUrl?: string;
   canPrev: boolean;
@@ -84,7 +84,7 @@ export function DocumentModal({
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/doc/${urlHash}`);
+        const res = await fetch(`/doc/${encodeURIComponent(String(urlHash))}`);
         if (cancelled) return;
         if (!res.ok) {
           setRawMarkdown('Unable to load document payload.');
@@ -169,7 +169,7 @@ export function DocumentModal({
 
   const handleShare = async () => {
     if (urlHash === null) return;
-    const url = `${window.location.origin}/?doc=${urlHash}`;
+    const url = `${window.location.origin}/?doc=${encodeURIComponent(String(urlHash))}`;
     await navigator.clipboard.writeText(url);
     setShared(true);
     window.setTimeout(() => setShared(false), 1500);

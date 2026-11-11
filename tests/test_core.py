@@ -24,7 +24,11 @@ from spaces.crawler.dedup import (
     hash_url,
 )
 from spaces.crawler.discovery import _strip_question_framing, discover_seed_urls_detailed
-from spaces.crawler.parser import extract_outbound_links, parse_page_content
+from spaces.crawler.parser import (
+    extract_outbound_links,
+    is_waf_or_empty_page,
+    parse_page_content,
+)
 from spaces.crawler.robots import RobotsTxtManager
 from spaces.crawler.sitemap import discover_sitemap_urls
 from spaces.gateway import app as gateway_app_module
@@ -173,7 +177,45 @@ class TestParserAndSecurity(unittest.TestCase):
             sanitize_fts_terms('quantum "computing"* OR NOT NEAR -- test!'),
             ["quantum", "computing", "test"],
         )
+        self.assertEqual(
+            sanitize_fts_terms("what is the name of elit us army force"),
+            ["elit", "us", "army", "force"],
+        )
+        self.assertEqual(
+            sanitize_fts_terms("domain name system"),
+            ["domain", "name", "system"],
+        )
         self.assertEqual(sanitize_fts_terms("   ???   "), [])
+
+    def test_waf_interstitial_detection_and_h1_title_fallback(self):
+        self.assertTrue(
+            is_waf_or_empty_page(
+                "Just a moment...",
+                "Performing security verification. Enable JavaScript and cookies to continue.",
+            )
+        )
+        self.assertTrue(
+            is_waf_or_empty_page(
+                "Access Denied",
+                "You don't have permission to access this resource on this server.",
+            )
+        )
+        self.assertTrue(is_waf_or_empty_page("Untitled Document", "Too short"))
+        self.assertFalse(
+            is_waf_or_empty_page(
+                "How Cloudflare Workers Handle HTTP 403 Edges",
+                "Cloudflare Workers run V8 isolates at network edge locations. " * 10,
+            )
+        )
+
+        no_title_html = (
+            "<html><body><main><h1>Fallback Heading Title</h1>"
+            "<p>Substantial article body paragraph discussing distributed systems in detail.</p>"
+            "</main></body></html>"
+        )
+        parsed = parse_page_content(no_title_html, "https://docs.example.org/h1")
+        self.assertEqual(parsed["title"], "Fallback Heading Title")
+        self.assertFalse(parsed["is_waf_blocked"])
 
     def test_config_rejects_hardcoded_placeholder_keys(self):
         with self.assertRaises(ValidationError):
@@ -314,6 +356,28 @@ class TestAsyncCrawlerModules(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(doc)
         mock_insert.assert_not_awaited()
 
+    async def test_fetch_and_index_skips_waf_interstitial(self):
+        waf_html = (
+            "<html><head><title>Just a moment...</title></head><body>"
+            "<p>Performing security verification. Enable JavaScript and cookies to continue.</p>"
+            "</body></html>"
+        )
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(
+            return_value=MagicMock(
+                status_code=200,
+                headers={"content-type": "text/html"},
+                text=waf_html,
+            )
+        )
+        with patch.object(crawler_app_module.settings, "RENDERER_SERVICE_URL", ""), \
+             patch.object(crawler_app_module.turso_crawler_client, "insert_search_index", AsyncMock()) as mock_insert:
+            doc = await crawler_app_module.fetch_and_index_document(
+                mock_session, "https://waf.example.org/blocked", check_robots=False
+            )
+        self.assertIsNone(doc)
+        mock_insert.assert_not_awaited()
+
     async def test_fetch_and_index_skips_bloom_seen_when_enabled(self):
         test_url = "https://seen.example.org/article"
         crawler_app_module.url_bloom.add(test_url)
@@ -334,6 +398,7 @@ class TestAsyncCrawlerModules(unittest.IsolatedAsyncioTestCase):
                 resp.text = (
                     '<a href="/l/?uddg=https%3A%2F%2Fwww.rust-lang.org%2F">Rust</a>'
                     '<a href="/l/?uddg=https%3A%2F%2Frust-lang.org%2Flearn">Rust Learn</a>'
+                    '<a href="/l/?uddg=https%3A%2F%2Ffiles.example.org%2Fpaper.pdf">PDF</a>'
                 )
             elif "wikipedia.org" in url:
                 resp.json = lambda: {"query": {"search": [{"title": "Rust (programming language)"}]}}
@@ -366,6 +431,7 @@ class TestAsyncCrawlerModules(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(seen_events), len(metrics))
         rust_count = sum(1 for u in urls if "rust-lang.org" in u)
         self.assertEqual(rust_count, 1)
+        self.assertFalse(any(u.endswith(".pdf") for u in urls))
         self.assertIn("https://en.wikipedia.org/wiki/Rust_(programming_language)", urls)
 
     async def test_turso_sqlite_end_to_end_database_operations(self):
@@ -382,6 +448,7 @@ class TestAsyncCrawlerModules(unittest.IsolatedAsyncioTestCase):
             with patch.object(db_mod.settings, "TURSO_DATABASE_URL", file_uri), \
                  patch.object(db_mod.settings, "TURSO_AUTH_TOKEN", "local-test-token"):
                 await client.connect()
+                await client._client.execute("PRAGMA foreign_keys = ON;")
                 with open(schema_path, "r", encoding="utf-8") as f:
                     for stmt in split_sql_statements(f.read()):
                         await client._client.execute(stmt)
@@ -407,12 +474,14 @@ class TestAsyncCrawlerModules(unittest.IsolatedAsyncioTestCase):
                 hits = await client.search("pulsar crawler", limit=5)
                 self.assertEqual(len(hits), 1)
                 self.assertEqual(hits[0]["url"], u_url)
+                self.assertEqual(hits[0]["url_hash"], str(u_hash))
                 self.assertIsNotNone(hits[0]["crawled_at"])
 
                 payload = await client.get_document_payload(u_hash)
                 self.assertEqual(decompress_text(payload), doc_text)
                 meta = await client.get_document_metadata(u_hash)
                 self.assertEqual(meta["title"], "Neutron Pulsar Guide")
+                self.assertEqual(meta["url_hash"], str(u_hash))
 
                 self.assertFalse(
                     await client.is_near_duplicate(sh, d_hash, threshold=3, exclude_url_hash=u_hash)
@@ -421,12 +490,14 @@ class TestAsyncCrawlerModules(unittest.IsolatedAsyncioTestCase):
                     await client.is_near_duplicate(sh, d_hash, threshold=3, exclude_url_hash=u_hash + 1)
                 )
 
-                fq_url = "https://astro.test/next"
+                # Unseen domain should auto-seed domains table to satisfy FK constraint
+                fq_url = "https://unseen.example.net/next"
+                fq_domain_hash = hash_domain("unseen.example.net")
                 enqueued = await client.enqueue_frontier_urls(
                     [
                         {
                             "url_hash": hash_url(fq_url),
-                            "domain_hash": d_hash,
+                            "domain_hash": fq_domain_hash,
                             "url": fq_url,
                             "priority": 0.9,
                         }
@@ -594,6 +665,40 @@ class TestFastAPIEndpoints(unittest.TestCase):
                 self.assertIn("event: crawl_success", body)
                 self.assertIn("event: live_result", body)
                 self.assertIn("event: done", body)
+
+    def test_large_64bit_url_hash_roundtrips_as_exact_string(self):
+        large_hash = -8197675117857346549
+        cached = [
+            {
+                "url_hash": str(large_hash),
+                "url": "https://example.org/large-hash",
+                "title": "64-bit Precision Check",
+                "snippet": "Verify exact decimal serialization past Number.MAX_SAFE_INTEGER.",
+                "score": 1.0,
+                "crawled_at": "2026-11-11 00:00:00",
+            }
+            for _ in range(5)
+        ]
+        meta_row = {
+            "url_hash": str(large_hash),
+            "url": "https://example.org/large-hash",
+            "title": "64-bit Precision Check",
+            "snippet": "Fallback snippet",
+            "crawled_at": "2026-11-11 00:00:00",
+        }
+        with patch.object(crawler_app_module.turso_crawler_client, "search", AsyncMock(return_value=cached)), \
+             patch.object(crawler_app_module.turso_crawler_client, "record_hot_topic", AsyncMock()), \
+             patch.object(crawler_app_module.turso_crawler_client, "get_document_metadata", AsyncMock(return_value=meta_row)), \
+             patch.object(crawler_app_module.turso_crawler_client, "get_document_payload", AsyncMock(return_value=compress_text("# Precision OK"))):
+            with TestClient(crawler_app_module.app) as client:
+                s_res = client.get("/search?q=precision")
+                self.assertEqual(s_res.status_code, 200)
+                self.assertEqual(s_res.json()["results"][0]["url_hash"], "-8197675117857346549")
+
+                d_res = client.get(f"/doc/{large_hash}")
+                self.assertEqual(d_res.status_code, 200)
+                self.assertEqual(d_res.json()["url_hash"], "-8197675117857346549")
+                self.assertEqual(d_res.json()["full_markdown"], "# Precision OK")
 
 
 if __name__ == "__main__":

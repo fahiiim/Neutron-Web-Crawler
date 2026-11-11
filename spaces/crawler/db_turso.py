@@ -6,11 +6,11 @@ import libsql_client
 
 try:
     from .config import settings
-    from .dedup import hamming_distance
+    from .dedup import extract_domain_host, hamming_distance
     from .logging_utils import get_logger
 except ImportError:
     from config import settings
-    from dedup import hamming_distance
+    from dedup import extract_domain_host, hamming_distance
     from logging_utils import get_logger
 
 logger = get_logger("neutron.db")
@@ -34,9 +34,18 @@ STOP_WORDS = {
 }
 
 
+_QUESTION_PREFIX_RE = re.compile(
+    r"^(what\s+is\s+(the\s+)?(name\s+of\s+)?|who\s+is\s+(the\s+)?|"
+    r"tell\s+me\s+about\s+|can\s+you\s+find\s+|how\s+to\s+|which\s+is\s+)",
+    flags=re.IGNORECASE,
+)
+
+
 def sanitize_fts_terms(query: str) -> List[str]:
-    """Extract safe alphanumeric tokens and strip FTS5 operator syntax."""
-    tokens = re.findall(r"[a-zA-Z0-9]+", (query or "").lower())
+    """Normalize conversational prefixes, extract safe tokens, and strip FTS5 syntax."""
+    stripped = _QUESTION_PREFIX_RE.sub("", (query or "").strip()).strip()
+    source_text = stripped if stripped else (query or "")
+    tokens = re.findall(r"[a-zA-Z0-9]+", source_text.lower())
     if not tokens:
         return []
 
@@ -141,7 +150,7 @@ class TursoCrawlerClient:
                 )
                 results.append(
                     {
-                        "url_hash": row["url_hash"],
+                        "url_hash": str(row["url_hash"]),
                         "url": row["canonical_url"],
                         "title": row["title"],
                         "snippet": row["snippet"],
@@ -207,7 +216,7 @@ class TursoCrawlerClient:
             if rs.rows:
                 row = rs.rows[0]
                 return {
-                    "url_hash": row["url_hash"],
+                    "url_hash": str(row["url_hash"]),
                     "url": row["canonical_url"],
                     "title": row["title"],
                     "snippet": row["snippet"],
@@ -330,6 +339,7 @@ class TursoCrawlerClient:
                     """
                     SELECT title FROM search_index
                     WHERE LOWER(title) LIKE ?
+                      AND LOWER(title) NOT IN ('just a moment...', 'access denied', 'untitled document', 'attention required! | cloudflare')
                     ORDER BY crawled_at DESC
                     LIMIT ?;
                     """,
@@ -415,6 +425,14 @@ class TursoCrawlerClient:
         if client is None:
             return False
 
+        domain_host = extract_domain_host(canonical_url)
+        sql_domain_seed = (
+            "INSERT OR IGNORE INTO domains (domain_hash, hostname) VALUES (?, ?);"
+        )
+        sql_domain_inc = (
+            "UPDATE domains SET total_crawled = total_crawled + 1, "
+            "updated_at = DATETIME('now') WHERE domain_hash = ?;"
+        )
         sql_index = """
         INSERT INTO search_index (
             url_hash, domain_hash, canonical_url, title, snippet,
@@ -428,6 +446,8 @@ class TursoCrawlerClient:
             crawled_at = DATETIME('now');
         """
         statements = [
+            libsql_client.Statement(sql_domain_seed, [domain_hash, domain_host]),
+            libsql_client.Statement(sql_domain_inc, [domain_hash]),
             libsql_client.Statement(
                 sql_index,
                 [
@@ -475,14 +495,29 @@ class TursoCrawlerClient:
         if client is None:
             return 0
 
-        sql = """
+        sql_domain = (
+            "INSERT OR IGNORE INTO domains (domain_hash, hostname) VALUES (?, ?);"
+        )
+        sql_frontier = """
         INSERT OR IGNORE INTO frontier_queue (
             url_hash, domain_hash, url, priority_score, status
         ) VALUES (?, ?, ?, ?, 0);
         """
+        unique_domains: Dict[int, str] = {}
+        for item in urls:
+            d_hash = int(item["domain_hash"])
+            if d_hash not in unique_domains:
+                unique_domains[d_hash] = (
+                    item.get("domain") or extract_domain_host(item["url"])
+                )
+
         statements = [
+            libsql_client.Statement(sql_domain, [d_hash, host])
+            for d_hash, host in unique_domains.items()
+        ]
+        statements.extend(
             libsql_client.Statement(
-                sql,
+                sql_frontier,
                 [
                     item["url_hash"],
                     item["domain_hash"],
@@ -491,11 +526,11 @@ class TursoCrawlerClient:
                 ],
             )
             for item in urls
-        ]
+        )
 
         try:
             await client.batch(statements)
-            return len(statements)
+            return len(urls)
         except Exception as exc:
             logger.warning(
                 "frontier_batch_enqueue_failed",

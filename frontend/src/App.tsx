@@ -280,7 +280,7 @@ export function App() {
   };
 
   const activeDoc = modalIdx >= 0 && results[modalIdx] ? results[modalIdx] : null;
-  const activeUrlHash = deepDocHash ?? (activeDoc ? activeDoc.url_hash : null);
+  const activeUrlHash = deepDocHash ?? (activeDoc ? String(activeDoc.url_hash) : null);
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col justify-between relative">
@@ -430,7 +430,6 @@ export function App() {
                     key={item.url}
                     item={item}
                     query={activeQuery}
-                    index={idx}
                     focused={idx === focusedCardIdx}
                     onOpenReader={() => {
                       setDeepDocHash(null);
