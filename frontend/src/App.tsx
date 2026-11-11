@@ -1,457 +1,431 @@
-import { Globe, Lock, ShieldCheck, Zap } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { AnswerCard } from './components/AnswerCard';
-import { CrawlProgressDrawer } from './components/CrawlProgressDrawer';
-import { DocumentModal } from './components/DocumentModal';
-import { Header } from './components/Header';
-import { ResultCard } from './components/ResultCard';
-import { SearchBar } from './components/SearchBar';
-import { StatsDrawer } from './components/StatsDrawer';
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Header } from "./components/Header";
+import { SearchBar } from "./components/SearchBar";
+import { AnswerCard } from "./components/AnswerCard";
+import { ResultCard } from "./components/ResultCard";
 import {
-  AnswerCitation,
-  CrawlItemStatus,
-  DiscoveryMetric,
+  CrawlProgressDrawer,
+  type CrawlItemStatus,
+} from "./components/CrawlProgressDrawer";
+import { StatsDrawer } from "./components/StatsDrawer";
+import { DocumentModal, type ReaderTarget } from "./components/DocumentModal";
+import type {
+  EngineStats,
   GroundedAnswer,
   SearchMode,
   SearchResult,
-} from './types';
-import { safeHttpUrl } from './utils/format';
+} from "./types";
 
-const SEARCH_MODES: Array<{ id: SearchMode; label: string }> = [
-  { id: 'all', label: 'All Web' },
-  { id: 'encyclopedia', label: 'Encyclopedia' },
-  { id: 'papers', label: 'Papers' },
-  { id: 'code', label: 'Code' },
-  { id: 'discussions', label: 'Discussions' },
+const SEARCH_MODES: { id: SearchMode; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "encyclopedia", label: "Encyclopedia" },
+  { id: "papers", label: "Papers" },
+  { id: "code", label: "Code" },
+  { id: "discussions", label: "Discussions" },
 ];
 
-const CURATED_TOPICS = [
-  'Quantum error correction',
-  'Rust async runtime',
-  'DeepSeek R1 architecture',
-  'Turso LibSQL FTS5',
+const EXAMPLE_QUERIES = [
+  "how does crispr work",
+  "rust ownership model",
+  "who wrote harry potter",
+  "latest james webb discoveries",
 ];
 
-const HISTORY_KEY = 'neutron_search_history';
+const RECENT_KEY = "neutron_recent_queries_v1";
+
+function loadRecent(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((s): s is string => typeof s === "string").slice(0, 8)
+      : [];
+  } catch {
+    return [];
+  }
+}
 
 export function App() {
-  const [queryInput, setQueryInput] = useState('');
-  const [activeQuery, setActiveQuery] = useState('');
-  const [searchMode, setSearchMode] = useState<SearchMode>('all');
-  const [hasSearched, setHasSearched] = useState(false);
-  const [isSearching, setIsSearching] = useState(false);
+  const [query, setQuery] = useState("");
+  const [mode, setMode] = useState<SearchMode>("all");
+  const [searched, setSearched] = useState(false);
+  const [activeQuery, setActiveQuery] = useState("");
+
   const [results, setResults] = useState<SearchResult[]>([]);
   const [answer, setAnswer] = useState<GroundedAnswer | null>(null);
-  const [latencyMs, setLatencyMs] = useState<number | null>(null);
-
-  const [trendingChips, setTrendingChips] = useState<string[]>(CURATED_TOPICS);
-  const [recentSearches, setRecentSearches] = useState<string[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
-    } catch {
-      return [];
-    }
-  });
-
-  const [showTelemetry, setShowTelemetry] = useState(false);
-  const [telemetryExpanded, setTelemetryExpanded] = useState(true);
-  const [indexStatus, setIndexStatus] = useState<{ count: number; durationMs: number } | null>(null);
-  const [discoveryMetrics, setDiscoveryMetrics] = useState<DiscoveryMetric[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [crawling, setCrawling] = useState(false);
+  const [statusText, setStatusText] = useState("");
   const [crawlItems, setCrawlItems] = useState<CrawlItemStatus[]>([]);
+  const [elapsedMs, setElapsedMs] = useState<number | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  const [recentQueries, setRecentQueries] = useState<string[]>(loadRecent);
+  const [selectedIdx, setSelectedIdx] = useState(-1);
+  const [readerTarget, setReaderTarget] = useState<ReaderTarget | null>(null);
   const [statsOpen, setStatsOpen] = useState(false);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [modalIdx, setModalIdx] = useState<number>(-1);
-  const [deepDocHash, setDeepDocHash] = useState<string | null>(null);
-  const [focusedCardIdx, setFocusedCardIdx] = useState<number>(-1);
+  const [stats, setStats] = useState<EngineStats | null>(null);
 
-  const inputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
-  const autoCollapseRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    (async () => {
+  const saveRecent = useCallback((q: string) => {
+    setRecentQueries((prev) => {
+      const next = [q, ...prev.filter((item) => item !== q)].slice(0, 8);
       try {
-        const res = await fetch('/trending');
-        if (res.ok) {
-          const data = await res.json();
-          const terms: string[] = (data.trending || [])
-            .map((t: { term: string }) => t.term.trim())
-            .filter((t: string) => t.length >= 2 && t.length <= 36);
-          if (terms.length >= 3) {
-            setTrendingChips(terms.slice(0, 4));
-          }
-        }
+        localStorage.setItem(RECENT_KEY, JSON.stringify(next));
       } catch {
-        // keep curated chips
+        // Ignore storage quota issues
       }
-    })();
-  }, []);
-
-  const persistHistory = useCallback((q: string) => {
-    setRecentSearches((prev) => {
-      const next = [q, ...prev.filter((item) => item.toLowerCase() !== q.toLowerCase())].slice(0, 15);
-      localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
       return next;
     });
   }, []);
 
-  const executeSearch = useCallback(
-    (rawQuery: string, modeOverride?: SearchMode) => {
-      const clean = rawQuery.trim();
-      if (!clean) return;
-      const activeMode = modeOverride ?? searchMode;
+  const clearRecent = useCallback(() => {
+    setRecentQueries([]);
+    try {
+      localStorage.removeItem(RECENT_KEY);
+    } catch {
+      // Ignore storage errors
+    }
+  }, []);
 
-      if (eventSourceRef.current) eventSourceRef.current.close();
-      if (autoCollapseRef.current) window.clearTimeout(autoCollapseRef.current);
+  const fetchStats = useCallback(async () => {
+    try {
+      const res = await fetch("/stats");
+      if (!res.ok) return;
+      const data = await res.json();
+      setStats(data);
+    } catch {
+      // Keep UI quiet on transient stats failure
+    }
+  }, []);
 
-      persistHistory(clean);
-      setQueryInput(clean);
-      setActiveQuery(clean);
-      setHasSearched(true);
-      setIsSearching(true);
-      setResults([]);
-      setAnswer(null);
-      setLatencyMs(null);
-      setFocusedCardIdx(-1);
-      setShowTelemetry(false);
-      setTelemetryExpanded(true);
-      setIndexStatus(null);
-      setDiscoveryMetrics([]);
-      setCrawlItems([]);
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
 
-      const t0 = performance.now();
-      const seen = new Set<string>();
+  const stopStream = useCallback(() => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+  }, []);
 
-      const addResult = (item: SearchResult, isLive: boolean) => {
-        const url = safeHttpUrl(item.url);
-        if (url === '#' || seen.has(url)) return;
-        seen.add(url);
-        setResults((prev) => [...prev, { ...item, url, isLive }]);
-      };
-
-      const runFallback = async () => {
-        try {
-          const res = await fetch(
-            `/search?q=${encodeURIComponent(clean)}&mode=${encodeURIComponent(activeMode)}`
-          );
-          if (res.ok) {
-            const data = await res.json();
-            if (data.answer) {
-              setAnswer(data.answer);
-            }
-            (data.results || []).forEach((item: SearchResult) =>
-              addResult(item, data.source !== 'index_cache')
-            );
-          }
-        } catch {
-          // ignore
-        } finally {
-          setIsSearching(false);
-          setLatencyMs(Math.round(performance.now() - t0));
-        }
-      };
-
+  const fallbackJsonSearch = useCallback(
+    async (cleanQuery: string, searchMode: SearchMode, t0: number) => {
       try {
-        const es = new EventSource(
-          `/search/stream?q=${encodeURIComponent(clean)}&mode=${encodeURIComponent(activeMode)}`
+        const res = await fetch(
+          `/search?q=${encodeURIComponent(cleanQuery)}&mode=${encodeURIComponent(searchMode)}`,
         );
-        eventSourceRef.current = es;
-
-        es.addEventListener('cached_results', (ev) => {
-          const data = JSON.parse(ev.data);
-          setIndexStatus({
-            count: data.count || 0,
-            durationMs: data.duration_ms || Math.round(performance.now() - t0),
-          });
-          (data.results || []).forEach((item: SearchResult) => addResult(item, false));
-        });
-
-        es.addEventListener('discovery_start', () => {
-          setShowTelemetry(true);
-          setTelemetryExpanded(true);
-        });
-
-        es.addEventListener('discovery_result', (ev) => {
-          const metric: DiscoveryMetric = JSON.parse(ev.data);
-          setShowTelemetry(true);
-          setDiscoveryMetrics((prev) => [
-            ...prev.filter((m) => m.source !== metric.source),
-            metric,
-          ]);
-        });
-
-        es.addEventListener('crawl_start', (ev) => {
-          const data = JSON.parse(ev.data);
-          setShowTelemetry(true);
-          setCrawlItems((prev) => [
-            ...prev.filter((c) => c.url !== data.url),
-            { url: data.url, domain: data.domain, status: 'fetching', detail: 'fetching...' },
-          ]);
-        });
-
-        es.addEventListener('crawl_success', (ev) => {
-          const data = JSON.parse(ev.data);
-          setCrawlItems((prev) =>
-            prev.map((c) =>
-              c.url === data.url
-                ? { ...c, status: 'indexed', detail: `${data.duration_ms}ms` }
-                : c
-            )
-          );
-        });
-
-        es.addEventListener('crawl_blocked', (ev) => {
-          const data = JSON.parse(ev.data);
-          setCrawlItems((prev) =>
-            prev.map((c) =>
-              c.url === data.url
-                ? { ...c, status: 'blocked', detail: data.reason || 'robots.txt' }
-                : c
-            )
-          );
-        });
-
-        es.addEventListener('crawl_error', (ev) => {
-          const data = JSON.parse(ev.data);
-          setCrawlItems((prev) =>
-            prev.map((c) =>
-              c.url === data.url
-                ? { ...c, status: 'error', detail: data.error || 'skipped' }
-                : c
-            )
-          );
-        });
-
-        es.addEventListener('live_result', (ev) => {
-          addResult(JSON.parse(ev.data), true);
-        });
-
-        es.addEventListener('answer', (ev) => {
-          setAnswer(JSON.parse(ev.data));
-        });
-
-        es.addEventListener('done', () => {
-          setIsSearching(false);
-          setLatencyMs(Math.round(performance.now() - t0));
-          es.close();
-          autoCollapseRef.current = window.setTimeout(() => {
-            setTelemetryExpanded(false);
-          }, 2400);
-        });
-
-        es.onerror = () => {
-          es.close();
-          if (seen.size === 0) {
-            runFallback();
-          } else {
-            setIsSearching(false);
-            setLatencyMs(Math.round(performance.now() - t0));
-          }
-        };
-      } catch {
-        runFallback();
+        if (!res.ok) throw new Error(`Search failed (${res.status})`);
+        const data = await res.json();
+        setResults(Array.isArray(data?.results) ? data.results : []);
+        setAnswer(data?.answer || null);
+        setElapsedMs(Math.round(performance.now() - t0));
+      } catch (err) {
+        setErrorMsg(
+          err instanceof Error ? err.message : "Search request failed",
+        );
+      } finally {
+        setLoading(false);
+        setCrawling(false);
       }
     },
-    [persistHistory, searchMode]
+    [],
   );
 
-  const handleOpenCitation = (cite: AnswerCitation) => {
-    const matchedIdx = results.findIndex((r) => String(r.url_hash) === String(cite.url_hash));
-    if (matchedIdx >= 0) {
-      setDeepDocHash(null);
-      setModalIdx(matchedIdx);
-      setModalOpen(true);
-    } else if (cite.url_hash) {
-      setDeepDocHash(String(cite.url_hash));
-      setModalIdx(-1);
-      setModalOpen(true);
-    }
-  };
+  const runSearch = useCallback(
+    (rawQuery: string, targetMode: SearchMode = mode, pushUrl = true) => {
+      const cleanQuery = rawQuery.trim();
+      if (!cleanQuery) return;
 
+      stopStream();
+      const t0 = performance.now();
+
+      setQuery(cleanQuery);
+      setActiveQuery(cleanQuery);
+      setMode(targetMode);
+      setSearched(true);
+      setLoading(true);
+      setCrawling(false);
+      setStatusText("");
+      setCrawlItems([]);
+      setResults([]);
+      setAnswer(null);
+      setErrorMsg(null);
+      setElapsedMs(null);
+      setSelectedIdx(-1);
+
+      saveRecent(cleanQuery);
+
+      if (pushUrl) {
+        const params = new URLSearchParams();
+        params.set("q", cleanQuery);
+        if (targetMode !== "all") params.set("mode", targetMode);
+        window.history.pushState(null, "", `?${params.toString()}`);
+      }
+
+      const streamUrl = `/search/stream?q=${encodeURIComponent(cleanQuery)}&mode=${encodeURIComponent(targetMode)}`;
+      const es = new EventSource(streamUrl);
+      eventSourceRef.current = es;
+      let finished = false;
+
+      es.addEventListener("cached_results", (ev: MessageEvent) => {
+        try {
+          const payload = JSON.parse(ev.data);
+          if (Array.isArray(payload?.results)) {
+            setResults(payload.results);
+          }
+          if (typeof payload?.duration_ms === "number") {
+            setElapsedMs(payload.duration_ms);
+          }
+        } catch {
+          // Ignore malformed event
+        }
+      });
+
+      es.addEventListener("status", (ev: MessageEvent) => {
+        try {
+          const payload = JSON.parse(ev.data);
+          setCrawling(true);
+          if (payload?.message) setStatusText(String(payload.message));
+        } catch {
+          // Ignore
+        }
+      });
+
+      es.addEventListener("discovery_start", () => {
+        setCrawling(true);
+      });
+
+      es.addEventListener("crawl_start", (ev: MessageEvent) => {
+        try {
+          const payload = JSON.parse(ev.data);
+          setCrawling(true);
+          if (!payload?.url) return;
+          setCrawlItems((prev) => {
+            if (prev.some((i) => i.url === payload.url)) return prev;
+            return [
+              ...prev,
+              {
+                url: payload.url,
+                domain: payload.domain || payload.url,
+                status: "pending",
+              },
+            ];
+          });
+        } catch {
+          // Ignore
+        }
+      });
+
+      es.addEventListener("crawl_success", (ev: MessageEvent) => {
+        try {
+          const payload = JSON.parse(ev.data);
+          setCrawlItems((prev) =>
+            prev.map((item) =>
+              item.url === payload.url
+                ? {
+                    ...item,
+                    status: "success",
+                    title: payload.title,
+                    durationMs: payload.duration_ms,
+                  }
+                : item,
+            ),
+          );
+        } catch {
+          // Ignore
+        }
+      });
+
+      es.addEventListener("crawl_blocked", (ev: MessageEvent) => {
+        try {
+          const payload = JSON.parse(ev.data);
+          setCrawlItems((prev) =>
+            prev.map((item) =>
+              item.url === payload.url
+                ? { ...item, status: "blocked", detail: payload.reason }
+                : item,
+            ),
+          );
+        } catch {
+          // Ignore
+        }
+      });
+
+      es.addEventListener("crawl_error", (ev: MessageEvent) => {
+        try {
+          const payload = JSON.parse(ev.data);
+          setCrawlItems((prev) =>
+            prev.map((item) =>
+              item.url === payload.url
+                ? { ...item, status: "error", detail: payload.error }
+                : item,
+            ),
+          );
+        } catch {
+          // Ignore
+        }
+      });
+
+      es.addEventListener("live_result", (ev: MessageEvent) => {
+        try {
+          const doc: SearchResult = JSON.parse(ev.data);
+          setResults((prev) => {
+            if (prev.some((r) => r.url === doc.url)) return prev;
+            return [...prev, doc];
+          });
+        } catch {
+          // Ignore
+        }
+      });
+
+      es.addEventListener("answer", (ev: MessageEvent) => {
+        try {
+          const parsed: GroundedAnswer = JSON.parse(ev.data);
+          setAnswer(parsed);
+        } catch {
+          // Ignore
+        }
+      });
+
+      es.addEventListener("done", () => {
+        finished = true;
+        setLoading(false);
+        setCrawling(false);
+        setElapsedMs(Math.round(performance.now() - t0));
+        es.close();
+        eventSourceRef.current = null;
+        fetchStats();
+      });
+
+      es.onerror = () => {
+        es.close();
+        eventSourceRef.current = null;
+        if (!finished) {
+          fallbackJsonSearch(cleanQuery, targetMode, t0);
+        }
+      };
+    },
+    [mode, stopStream, saveRecent, fetchStats, fallbackJsonSearch],
+  );
+
+  // Sync URL query parameters on mount and back/forward navigation
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const qParam = params.get('q');
-    const docParam = params.get('doc');
-    if (qParam) {
-      executeSearch(qParam);
-    } else if (docParam && /^-?\d+$/.test(docParam)) {
-      setDeepDocHash(docParam);
-      setModalOpen(true);
-    }
-  }, [executeSearch]);
+    const syncFromUrl = () => {
+      const params = new URLSearchParams(window.location.search);
+      const q = (params.get("q") || "").trim();
+      const m = (params.get("mode") || "all") as SearchMode;
+      const validMode = SEARCH_MODES.some((sm) => sm.id === m) ? m : "all";
+      if (q) {
+        runSearch(q, validMode, false);
+      } else {
+        stopStream();
+        setSearched(false);
+        setQuery("");
+        setActiveQuery("");
+        setResults([]);
+        setAnswer(null);
+      }
+    };
+    syncFromUrl();
+    window.addEventListener("popstate", syncFromUrl);
+    return () => {
+      window.removeEventListener("popstate", syncFromUrl);
+      stopStream();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
+  // Keyboard shortcuts: / or Ctrl+K to focus, j/k to navigate results
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (modalOpen || statsOpen) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      const isTyping = tag === "INPUT" || tag === "TEXTAREA";
 
-      if ((e.key === 'k' || e.key === 'K') && (e.metaKey || e.ctrlKey)) {
+      if ((e.key === "/" && !isTyping) || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k")) {
         e.preventDefault();
-        inputRef.current?.focus();
-        inputRef.current?.select();
+        searchInputRef.current?.focus();
         return;
       }
 
-      const activeTag = document.activeElement?.tagName.toLowerCase();
-      if (activeTag === 'input' || activeTag === 'textarea') return;
+      if (isTyping || readerTarget || statsOpen || !searched || results.length === 0) {
+        return;
+      }
 
-      if (e.key === '/') {
+      if (e.key === "j") {
         e.preventDefault();
-        inputRef.current?.focus();
-      } else if (e.key === 'j' && results.length > 0) {
-        setFocusedCardIdx((i) => Math.min(results.length - 1, i + 1));
-      } else if (e.key === 'k' && results.length > 0) {
-        setFocusedCardIdx((i) => Math.max(0, i - 1));
-      } else if (e.key === 'Enter' && focusedCardIdx >= 0 && results[focusedCardIdx]) {
-        setDeepDocHash(null);
-        setModalIdx(focusedCardIdx);
-        setModalOpen(true);
+        setSelectedIdx((prev) => Math.min(results.length - 1, prev + 1));
+      } else if (e.key === "k") {
+        e.preventDefault();
+        setSelectedIdx((prev) => Math.max(0, prev - 1));
+      } else if (e.key === "Enter" && selectedIdx >= 0 && results[selectedIdx]) {
+        e.preventDefault();
+        window.open(results[selectedIdx].url, "_blank", "noopener,noreferrer");
       }
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [modalOpen, statsOpen, results, focusedCardIdx]);
 
-  const resetToHome = () => {
-    if (eventSourceRef.current) eventSourceRef.current.close();
-    setHasSearched(false);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [searched, results, selectedIdx, readerTarget, statsOpen]);
+
+  const handleGoHome = () => {
+    stopStream();
+    setSearched(false);
+    setQuery("");
+    setActiveQuery("");
     setResults([]);
     setAnswer(null);
-    setActiveQuery('');
-    setQueryInput('');
-    setShowTelemetry(false);
-    setLatencyMs(null);
-    inputRef.current?.focus();
+    setErrorMsg(null);
+    setLoading(false);
+    setCrawling(false);
+    window.history.pushState(null, "", "/");
   };
 
-  const activeDoc = modalIdx >= 0 && results[modalIdx] ? results[modalIdx] : null;
-  const activeUrlHash = deepDocHash ?? (activeDoc ? String(activeDoc.url_hash) : null);
+  const handleModeChange = (nextMode: SearchMode) => {
+    setMode(nextMode);
+    if (searched && activeQuery) {
+      runSearch(activeQuery, nextMode, true);
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-black text-white flex flex-col justify-between relative">
-      {/* Static subtle spotlight & dot grid (no animations) */}
-      <div
-        aria-hidden="true"
-        className="hero-backdrop fixed inset-x-0 top-0 h-[520px] pointer-events-none z-0"
+    <div className="min-h-screen bg-black text-white flex flex-col">
+      <Header
+        onGoHome={handleGoHome}
+        onOpenStats={() => setStatsOpen(true)}
+        pagesIndexed={stats?.pages_indexed}
       />
 
-      <div className="relative z-10 flex flex-col min-h-screen">
-        <Header
-          onOpenStats={() => setStatsOpen(true)}
-          onResetHome={resetToHome}
-          compact={hasSearched}
-        />
+      {!searched ? (
+        <main className="flex-1 flex flex-col items-center justify-center px-4 pb-20">
+          <div className="w-full max-w-2xl flex flex-col items-center">
+            <h1 className="text-4xl sm:text-5xl font-semibold tracking-tight text-white mb-7">
+              Neutron
+            </h1>
 
-        {!hasSearched ? (
-          <main className="flex-1 flex flex-col items-center justify-center px-4 sm:px-6 pb-20 pt-10">
-            <div className="w-full max-w-2xl text-center">
-              <div className="inline-flex items-center space-x-2 px-3.5 py-1 rounded-full surface-panel text-[11px] font-mono text-white mb-6">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#4ade80]" />
-                <span>DECENTRALIZED</span>
-                <span className="text-white/40">&middot;</span>
-                <span className="text-glow-green">REAL-TIME SEARCH</span>
-              </div>
+            <SearchBar
+              query={query}
+              onChange={setQuery}
+              onSubmit={(q) => runSearch(q, mode)}
+              loading={loading}
+              recentQueries={recentQueries}
+              onClearRecent={clearRecent}
+              inputRef={searchInputRef}
+            />
 
-              <h1 className="font-varsity text-4xl sm:text-6xl text-white mb-4 leading-[1.12]">
-                SEARCH THE <span className="text-glow-green">LIVE WEB</span>
-              </h1>
-              <p className="font-classic text-[15px] sm:text-base text-white/90 max-w-lg mx-auto mb-9 leading-relaxed">
-                Sub-15ms indexed retrieval paired with live parallel crawling, clean
-                markdown reading, and zero telemetry.
-              </p>
-
-              <SearchBar
-                query={queryInput}
-                onQueryChange={setQueryInput}
-                onSubmit={(q) => executeSearch(q)}
-                recentSearches={recentSearches}
-                onClearRecent={() => {
-                  localStorage.removeItem(HISTORY_KEY);
-                  setRecentSearches([]);
-                }}
-                compact={false}
-                inputRef={inputRef}
-              />
-
-              {/* Vertical Filter Pills */}
-              <div className="mt-4 flex items-center justify-center flex-wrap gap-1.5 font-mono text-[11px]">
-                {SEARCH_MODES.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => setSearchMode(m.id)}
-                    className={`px-3 py-1 rounded-full border transition-colors ${
-                      searchMode === m.id
-                        ? 'bg-emerald-500/15 text-glow-green border-emerald-400/50'
-                        : 'border-white/15 text-white/75 hover:text-white hover:border-white/30'
-                    }`}
-                  >
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-
-              {/* Prompt Chips */}
-              <div className="mt-5 flex items-center justify-center flex-wrap gap-2 font-classic">
-                {trendingChips.map((chip) => (
-                  <button
-                    key={chip}
-                    type="button"
-                    onClick={() => executeSearch(chip)}
-                    className="text-xs px-3.5 py-1.5 rounded-lg surface-interactive text-white hover:text-[#4ade80] truncate max-w-[230px]"
-                  >
-                    {chip}
-                  </button>
-                ))}
-              </div>
-
-              {/* Clean 3-pillar trust strip */}
-              <div className="mt-10 pt-6 border-t border-white/[0.08] flex flex-wrap items-center justify-center gap-x-7 gap-y-2 text-xs font-classic text-white/90">
-                <span className="inline-flex items-center space-x-1.5">
-                  <Zap className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Sub-15ms FTS5</span>
-                </span>
-                <span className="inline-flex items-center space-x-1.5">
-                  <Globe className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>6 Live Discovery Sources</span>
-                </span>
-                <span className="inline-flex items-center space-x-1.5">
-                  <Lock className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Zero Tracking</span>
-                </span>
-              </div>
-            </div>
-          </main>
-        ) : (
-          <main className="flex-1 w-full max-w-3xl mx-auto px-4 sm:px-6 py-6">
-            <div className="mb-3.5">
-              <SearchBar
-                query={queryInput}
-                onQueryChange={setQueryInput}
-                onSubmit={(q) => executeSearch(q)}
-                recentSearches={recentSearches}
-                onClearRecent={() => {
-                  localStorage.removeItem(HISTORY_KEY);
-                  setRecentSearches([]);
-                }}
-                compact={true}
-                inputRef={inputRef}
-              />
-            </div>
-
-            <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar pb-3 mb-2 border-b border-white/[0.08] font-mono text-[11px]">
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5">
               {SEARCH_MODES.map((m) => (
                 <button
                   key={m.id}
                   type="button"
-                  onClick={() => {
-                    setSearchMode(m.id);
-                    executeSearch(activeQuery, m.id);
-                  }}
-                  className={`px-3 py-1 rounded-full border whitespace-nowrap transition-colors ${
-                    searchMode === m.id
-                      ? 'bg-emerald-500/15 text-glow-green border-emerald-400/50'
-                      : 'border-white/15 text-white/75 hover:text-white hover:border-white/30'
+                  onClick={() => handleModeChange(m.id)}
+                  className={`px-3 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                    mode === m.id
+                      ? "bg-white text-black"
+                      : "text-neutral-400 hover:text-white hover:bg-white/[0.06]"
                   }`}
                 >
                   {m.label}
@@ -459,132 +433,154 @@ export function App() {
               ))}
             </div>
 
-            <div className="flex items-center justify-between text-xs font-mono text-white mb-3 px-0.5">
+            <div className="mt-7 flex flex-wrap items-center justify-center gap-2">
+              {EXAMPLE_QUERIES.map((example) => (
+                <button
+                  key={example}
+                  type="button"
+                  onClick={() => runSearch(example, mode)}
+                  className="px-3 py-1 rounded-full border border-white/10 hover:border-white/30 text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer"
+                >
+                  {example}
+                </button>
+              ))}
+            </div>
+          </div>
+        </main>
+      ) : (
+        <main className="flex-1 w-full">
+          <div className="border-b border-white/10 bg-black">
+            <div className="max-w-4xl mx-auto px-4 sm:px-6 pt-4 pb-3 space-y-3">
+              <SearchBar
+                query={query}
+                onChange={setQuery}
+                onSubmit={(q) => runSearch(q, mode)}
+                loading={loading}
+                compact
+                recentQueries={recentQueries}
+                onClearRecent={clearRecent}
+                inputRef={searchInputRef}
+              />
+
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+                {SEARCH_MODES.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => handleModeChange(m.id)}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${
+                      mode === m.id
+                        ? "bg-white text-black"
+                        : "text-neutral-400 hover:text-white hover:bg-white/[0.06]"
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="max-w-3xl mx-auto px-4 sm:px-6 pt-5 pb-16">
+            <div className="flex items-center justify-between text-xs text-neutral-500 mb-3">
               <span>
-                {isSearching
-                  ? `Searching "${activeQuery}"...`
-                  : `${results.length} ${results.length === 1 ? 'result' : 'results'} for "${activeQuery}"`}
+                {loading && results.length === 0
+                  ? "Searching..."
+                  : `${results.length} ${results.length === 1 ? "result" : "results"}${
+                      elapsedMs !== null ? ` · ${(elapsedMs / 1000).toFixed(2)}s` : ""
+                    }`}
               </span>
-              {latencyMs !== null && (
-                <span className="text-glow-green">{latencyMs}ms</span>
-              )}
             </div>
 
             <CrawlProgressDrawer
-              visible={showTelemetry}
-              expanded={telemetryExpanded}
-              onToggleExpand={() => setTelemetryExpanded((e) => !e)}
-              indexStatus={indexStatus}
-              discoveryMetrics={discoveryMetrics}
-              crawlItems={crawlItems}
-              isSearching={isSearching}
+              active={crawling}
+              statusText={statusText}
+              items={crawlItems}
             />
 
+            {errorMsg && (
+              <div className="surface-card rounded-lg p-4 mb-5 text-sm text-neutral-300">
+                {errorMsg}
+              </div>
+            )}
+
             {answer && (
-              <AnswerCard answer={answer} onOpenCitation={handleOpenCitation} />
+              <AnswerCard
+                answer={answer}
+                results={results}
+                onOpenReader={(target) => setReaderTarget(target)}
+              />
             )}
 
-            {isSearching && results.length === 0 && (
-              <div className="space-y-3" aria-hidden="true">
-                {[1, 2, 3].map((k) => (
-                  <div
-                    key={k}
-                    className="surface-panel rounded-xl p-5 space-y-2.5"
-                  >
-                    <div className="h-3 w-36 bg-white/10 rounded" />
-                    <div className="h-4 w-3/4 bg-white/15 rounded" />
-                    <div className="h-3 w-full bg-white/10 rounded" />
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {!isSearching && results.length === 0 && (
-              <div className="surface-panel rounded-xl p-8 text-center">
-                <p className="font-varsity text-sm text-white mb-1.5">
-                  NO DOCUMENTS FOUND FOR &ldquo;{activeQuery}&rdquo;
-                </p>
-                <p className="font-classic text-xs text-white/85">
-                  Try shorter technical terms or broaden your search keywords.
-                </p>
-              </div>
-            )}
-
-            {results.length > 0 && (
-              <ul role="list" className="space-y-3">
-                {results.map((item, idx) => (
+            {results.length > 0 ? (
+              <div>
+                {results.map((result, idx) => (
                   <ResultCard
-                    key={item.url}
-                    item={item}
-                    query={activeQuery}
-                    focused={idx === focusedCardIdx}
-                    onOpenReader={() => {
-                      setDeepDocHash(null);
-                      setModalIdx(idx);
-                      setModalOpen(true);
-                    }}
+                    key={`${result.url}-${idx}`}
+                    result={result}
+                    index={idx}
+                    selected={idx === selectedIdx}
+                    onOpenReader={(target) => setReaderTarget(target)}
                   />
                 ))}
-              </ul>
-            )}
-          </main>
-        )}
-
-        <footer className="border-t border-white/[0.1] bg-black py-4 px-4 sm:px-6 text-xs text-white font-classic">
-          <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-            <div className="inline-flex items-center space-x-2">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Zero tracking, cookies, or telemetry</span>
-            </div>
-            <div className="flex items-center space-x-5 font-mono text-[11px] text-white">
-              <a href="/privacy" className="hover:text-[#4ade80] transition-colors">
-                Privacy
-              </a>
-              <a
-                href="/docs"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:text-[#4ade80] transition-colors"
-              >
-                API Docs
-              </a>
-              <a
-                href="/health"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:text-[#4ade80] transition-colors"
-              >
-                Status
-              </a>
-              <a
-                href="https://github.com/fahiiim/Neutron-Web-Crawler"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:text-[#4ade80] transition-colors"
-              >
-                GitHub
-              </a>
-            </div>
+              </div>
+            ) : !loading ? (
+              <div className="py-16 text-center">
+                <p className="text-sm text-neutral-300">
+                  No matching pages found for &ldquo;{activeQuery}&rdquo;.
+                </p>
+                <div className="mt-4 flex items-center justify-center gap-3 text-xs">
+                  {mode !== "all" && (
+                    <button
+                      type="button"
+                      onClick={() => handleModeChange("all")}
+                      className="px-3 py-1.5 rounded-md border border-white/15 hover:border-white/35 text-white transition-colors cursor-pointer"
+                    >
+                      Search all sources
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => runSearch(activeQuery, mode)}
+                    className="px-3 py-1.5 rounded-md bg-white text-black font-medium hover:bg-neutral-200 transition-colors cursor-pointer"
+                  >
+                    Retry
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
-        </footer>
-      </div>
+        </main>
+      )}
+
+      <footer className="border-t border-white/[0.08] py-4 px-4 sm:px-6 text-center text-xs text-neutral-500">
+        <span>Neutron</span>
+        <span className="mx-2 text-neutral-700">·</span>
+        <a href="/privacy" className="hover:text-neutral-300 transition-colors">
+          Privacy
+        </a>
+        <span className="mx-2 text-neutral-700">·</span>
+        <a
+          href="/docs"
+          target="_blank"
+          rel="noreferrer"
+          className="hover:text-neutral-300 transition-colors"
+        >
+          API
+        </a>
+      </footer>
 
       <DocumentModal
-        open={modalOpen}
-        urlHash={activeUrlHash}
-        initialTitle={activeDoc?.title || 'Document Reader'}
-        initialUrl={activeDoc?.url}
-        canPrev={deepDocHash === null && modalIdx > 0}
-        canNext={deepDocHash === null && modalIdx >= 0 && modalIdx < results.length - 1}
-        onPrev={() => setModalIdx((i) => Math.max(0, i - 1))}
-        onNext={() => setModalIdx((i) => Math.min(results.length - 1, i + 1))}
-        onClose={() => {
-          setModalOpen(false);
-          setDeepDocHash(null);
-        }}
+        target={readerTarget}
+        onClose={() => setReaderTarget(null)}
       />
 
-      <StatsDrawer open={statsOpen} onClose={() => setStatsOpen(false)} />
+      <StatsDrawer
+        open={statsOpen}
+        onClose={() => setStatsOpen(false)}
+        stats={stats}
+        onRefresh={fetchStats}
+      />
     </div>
   );
 }

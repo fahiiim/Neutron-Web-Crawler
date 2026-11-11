@@ -1,152 +1,99 @@
-import {
-  Activity,
-  AlertCircle,
-  CheckCircle2,
-  ChevronDown,
-  ChevronUp,
-  Database,
-  Globe,
-  Loader2,
-  ShieldBan,
-} from 'lucide-react';
-import { CrawlItemStatus, DiscoveryMetric } from '../types';
+import React, { useState } from "react";
+import { Check, ChevronDown, ChevronUp, Loader2, Minus } from "lucide-react";
+
+export interface CrawlItemStatus {
+  url: string;
+  domain: string;
+  title?: string;
+  status: "pending" | "success" | "blocked" | "error";
+  durationMs?: number;
+  detail?: string;
+}
 
 interface CrawlProgressDrawerProps {
-  visible: boolean;
-  expanded: boolean;
-  onToggleExpand: () => void;
-  indexStatus: { count: number; durationMs: number } | null;
-  discoveryMetrics: DiscoveryMetric[];
-  crawlItems: CrawlItemStatus[];
-  isSearching: boolean;
+  active: boolean;
+  statusText: string;
+  items: CrawlItemStatus[];
 }
 
-export function CrawlProgressDrawer({
-  visible,
-  expanded,
-  onToggleExpand,
-  indexStatus,
-  discoveryMetrics,
-  crawlItems,
-  isSearching,
-}: CrawlProgressDrawerProps) {
-  if (!visible) return null;
+export const CrawlProgressDrawer: React.FC<CrawlProgressDrawerProps> = ({
+  active,
+  statusText,
+  items,
+}) => {
+  const [expanded, setExpanded] = useState(false);
 
-  const indexedCount = crawlItems.filter((c) => c.status === 'indexed').length;
-  const blockedCount = crawlItems.filter((c) => c.status === 'blocked').length;
-  const failedCount = crawlItems.filter((c) => c.status === 'error').length;
+  if (!active && items.length === 0) {
+    return null;
+  }
+
+  const completedCount = items.filter((i) => i.status !== "pending").length;
 
   return (
-    <section
-      aria-label="Live crawl telemetry"
-      className="w-full mb-5 rounded-xl surface-panel overflow-hidden text-xs"
-    >
-      <button
-        type="button"
-        onClick={onToggleExpand}
-        className="w-full px-4 py-2.5 flex items-center justify-between text-left hover:bg-white/[0.03] transition-colors"
-      >
-        <div className="flex items-center space-x-2.5">
-          {isSearching ? (
-            <Loader2 className="w-3.5 h-3.5 text-emerald-400 animate-spin" />
-          ) : (
-            <Activity className="w-3.5 h-3.5 text-emerald-400" />
-          )}
-          <span className="font-varsity text-[12px] text-white">
-            {isSearching ? 'LIVE JIT CRAWL PIPELINE' : 'CRAWL TRACE'}
+    <div className="mb-4">
+      <div className="flex items-center justify-between gap-3 text-xs text-neutral-400 py-1">
+        <div className="flex items-center gap-2 min-w-0">
+          {active && <Loader2 className="w-3.5 h-3.5 animate-spin text-white shrink-0" />}
+          <span className="truncate">
+            {active
+              ? statusText || "Checking live web pages..."
+              : `Checked ${completedCount} live ${completedCount === 1 ? "source" : "sources"}`}
           </span>
-          {crawlItems.length > 0 && (
-            <span className="text-[11px] font-mono text-glow-green hidden sm:inline">
-              {indexedCount} indexed &middot; {blockedCount} blocked &middot; {failedCount} skipped
-            </span>
-          )}
         </div>
-        <div className="flex items-center space-x-1.5 text-white font-mono text-[11px]">
-          <span>{expanded ? 'Collapse' : 'Inspect'}</span>
-          {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-        </div>
-      </button>
 
-      {expanded && (
-        <div className="px-4 pb-3.5 pt-2.5 border-t border-white/[0.1] space-y-3 font-mono text-[11px]">
-          {indexStatus && (
-            <div className="flex items-center justify-between text-white">
-              <span className="inline-flex items-center space-x-2">
-                <Database className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Turso FTS5 index query</span>
+        {items.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setExpanded((prev) => !prev)}
+            className="inline-flex items-center gap-1 text-neutral-500 hover:text-white transition-colors shrink-0 cursor-pointer"
+          >
+            <span>{expanded ? "Hide" : "Details"}</span>
+            {expanded ? (
+              <ChevronUp className="w-3.5 h-3.5" />
+            ) : (
+              <ChevronDown className="w-3.5 h-3.5" />
+            )}
+          </button>
+        )}
+      </div>
+
+      {expanded && items.length > 0 && (
+        <div className="surface-card rounded-lg p-3 mt-1.5 space-y-2 max-h-56 overflow-y-auto">
+          {items.map((item) => (
+            <div
+              key={item.url}
+              className="flex items-center justify-between gap-3 text-xs"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                {item.status === "pending" && (
+                  <Loader2 className="w-3 h-3 animate-spin text-neutral-400 shrink-0" />
+                )}
+                {item.status === "success" && (
+                  <Check className="w-3 h-3 text-white shrink-0" />
+                )}
+                {(item.status === "blocked" || item.status === "error") && (
+                  <Minus className="w-3 h-3 text-neutral-600 shrink-0" />
+                )}
+                <span className="font-mono-tech text-[11px] text-neutral-300 truncate">
+                  {item.domain}
+                </span>
+                {item.title && (
+                  <span className="text-neutral-500 truncate hidden sm:inline">
+                    {item.title}
+                  </span>
+                )}
+              </div>
+              <span className="font-mono-tech text-[11px] text-neutral-500 shrink-0">
+                {item.status === "pending"
+                  ? "fetching"
+                  : item.durationMs
+                    ? `${item.durationMs}ms`
+                    : item.status}
               </span>
-              <span className="text-glow-green">
-                {indexStatus.count} hits ({indexStatus.durationMs}ms)
-              </span>
             </div>
-          )}
-
-          {discoveryMetrics.length > 0 && (
-            <div className="space-y-1.5">
-              <div className="font-varsity text-[10px] tracking-wider text-white">
-                Seed Discovery
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                {discoveryMetrics.map((m) => (
-                  <div
-                    key={m.source}
-                    className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-white/[0.03] border border-white/[0.08]"
-                  >
-                    <span className="inline-flex items-center space-x-1.5 text-white">
-                      <Globe className="w-3 h-3 text-emerald-400" />
-                      <span>{m.source}</span>
-                    </span>
-                    <span className="text-white/90">
-                      {m.url_count} URLs &middot; {m.duration_ms}ms
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {crawlItems.length > 0 && (
-            <div className="space-y-1.5">
-              <div className="font-varsity text-[10px] tracking-wider text-white">
-                Live Fetches
-              </div>
-              <div className="max-h-36 overflow-y-auto space-y-1 pr-1">
-                {crawlItems.map((item) => (
-                  <div
-                    key={item.url}
-                    className="flex items-center justify-between gap-3 py-1 text-white"
-                  >
-                    <span className="inline-flex items-center space-x-2 min-w-0">
-                      {item.status === 'fetching' && (
-                        <Loader2 className="w-3 h-3 text-emerald-400 animate-spin shrink-0" />
-                      )}
-                      {item.status === 'indexed' && (
-                        <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
-                      )}
-                      {item.status === 'blocked' && (
-                        <ShieldBan className="w-3 h-3 text-white shrink-0" />
-                      )}
-                      {item.status === 'error' && (
-                        <AlertCircle className="w-3 h-3 text-white/75 shrink-0" />
-                      )}
-                      <span className="truncate">{item.domain}</span>
-                    </span>
-                    <span
-                      className={
-                        item.status === 'indexed'
-                          ? 'text-glow-green shrink-0'
-                          : 'text-white/85 shrink-0'
-                      }
-                    >
-                      {item.detail}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          ))}
         </div>
       )}
-    </section>
+    </div>
   );
-}
+};

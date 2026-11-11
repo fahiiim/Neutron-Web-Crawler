@@ -15,6 +15,26 @@ _PROTECT_WORDS_RE = re.compile(
 )
 _INITIAL_DOT_RE = re.compile(r"(^|[\s(.\u0000])([A-Z])\.(?=\s*[A-Z])")
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"'(\[])|\n+")
+_INLINE_REF_RE = re.compile(
+    r"\s*\[(?:\d+|citation needed|edit|update|clarification needed|note\s*\d+)\]",
+    flags=re.IGNORECASE,
+)
+_IPA_PARENS_RE = re.compile(
+    r"(?:(?<=\()|(?<=[;,]))\s*(?:(?:US|UK)\s*:\s*)?/[^/\n]{2,60}/(?:\s*(?:ⓘ|listen))?",
+    flags=re.IGNORECASE,
+)
+_EMPTY_PAREN_SEP_RE = re.compile(r"\(\s*[;,:\s]+")
+_PHOTO_AGENCIES = (
+    r"(?:Getty Images|AP Photo|Reuters|AFP|Shutterstock|iStock|Alamy|Associated Press|Bloomberg)"
+)
+_PHOTO_CREDIT_PARENS_RE = re.compile(
+    rf"\([^)]*\b{_PHOTO_AGENCIES}\b[^)]*\)",
+    flags=re.IGNORECASE,
+)
+_PHOTO_CREDIT_PREFIX_RE = re.compile(
+    rf"(?:^|(?<=[.!?]\s))[^.!?\n]{{0,120}}?(?:/\s*|photo\s+by\s+|credit:\s*){_PHOTO_AGENCIES}(?:\s+via\s+[A-Z][\w\s]{{0,30}})?[:.\s-]*",
+    flags=re.IGNORECASE,
+)
 _SENTINEL = "\u0000"
 _BOILERPLATE_PHRASES = (
     "accept cookies",
@@ -34,6 +54,19 @@ _DEFINITION_CUE_RE = re.compile(
 )
 
 
+def _sanitize_prose(text: str) -> str:
+    """Remove markdown URLs, footnote brackets, Wikipedia IPA, and photo credits."""
+    s = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    s = _INLINE_REF_RE.sub("", s)
+    s = _PHOTO_CREDIT_PARENS_RE.sub("", s)
+    s = _PHOTO_CREDIT_PREFIX_RE.sub("", s)
+    s = _IPA_PARENS_RE.sub("", s)
+    s = re.sub(r"\s*(?:\(\s*listen\s*\)|ⓘ)\s*", " ", s, flags=re.IGNORECASE)
+    s = _EMPTY_PAREN_SEP_RE.sub("(", s)
+    s = re.sub(r"\(\s*\)", "", s)
+    return re.sub(r"\s{2,}", " ", s).strip()
+
+
 def _clean_sentences(raw_text: str) -> List[str]:
     """Split text/markdown into clean declarative prose sentences."""
     cleaned_lines: List[str] = []
@@ -45,8 +78,8 @@ def _clean_sentences(raw_text: str) -> List[str]:
             continue
         if in_code or not s or s.startswith("#"):
             continue
-        s = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", s)
         s = s.lstrip(">-*• ").strip()
+        s = _sanitize_prose(s)
         if s:
             cleaned_lines.append(s)
 
@@ -74,7 +107,7 @@ def _token_jaccard(a: str, b: str) -> float:
 
 def extract_query_focused_snippet(query: str, text: str, max_len: int = 320) -> str:
     """Return a concise excerpt centered on the highest query-matching sentences."""
-    clean_full = " ".join((text or "").split())
+    clean_full = _sanitize_prose(" ".join((text or "").split()))
     if not clean_full:
         return ""
     if len(clean_full) <= max_len:

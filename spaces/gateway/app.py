@@ -169,11 +169,12 @@ async def stats_endpoint() -> Dict[str, Any]:
 async def privacy_endpoint() -> str:
     return (
         "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
-        "<title>Neutron Privacy</title></head><body style='background:#000000;color:#ffffff;"
-        "font-family:Georgia,serif;max-width:680px;margin:40px auto;padding:20px'>"
-        "<h1>Neutron Privacy Promise</h1>"
-        "<p>Zero Tracking &bull; Zero Cookies &bull; Zero Telemetry.</p>"
-        "<p><a href='/' style='color:#4ade80'>&larr; Back to Neutron</a></p></body></html>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>Neutron Privacy</title></head><body style='background:#000000;color:#d4d4d4;"
+        "font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Inter,sans-serif;max-width:640px;margin:64px auto;padding:0 24px;line-height:1.7;font-size:15px'>"
+        "<h1 style='color:#ffffff;font-size:24px;font-weight:600;letter-spacing:-0.02em'>Neutron Privacy</h1>"
+        "<p>Zero Tracking. Zero Cookies. Zero server-side query telemetry.</p>"
+        "<p style='margin-top:28px'><a href='/' style='color:#ffffff;text-decoration:underline;text-underline-offset:4px'>&larr; Back to Neutron</a></p></body></html>"
     )
 
 

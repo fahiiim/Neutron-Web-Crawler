@@ -39,11 +39,14 @@ _MAIN_CONTENT_SELECTORS = (
 )
 
 _BLOCK_SELECTORS = (
-    "h1, h2, h3, h4, p, li, blockquote, pre, td, th, figcaption, summary, details"
+    "h1, h2, h3, h4, p, li, blockquote, pre, td, th, summary, details"
 )
 
 _JUNK_SELECTORS = (
     "script, style, noscript, svg, nav, footer, aside, "
+    "figcaption, figure caption, .caption, .wp-caption-text, "
+    ".photo-credit, .image-credit, .media-credit, "
+    "sup.reference, .mw-ref, .hatnote, .shortdescription, "
     "[role='navigation'], [role='complementary'], [role='search'], "
     ".cookie-banner, .cookie-consent, .advertisement, .ads, .sidebar, "
     ".mw-jump-link, .vector-menu, .vector-dropdown, .vector-page-toolbar, "

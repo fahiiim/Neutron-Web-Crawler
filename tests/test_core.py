@@ -320,6 +320,45 @@ class TestParserAndSecurity(unittest.TestCase):
         self.assertIn("Joanne Rowling", ans["summary"])
         self.assertEqual(ans["citations"][0]["url_hash"], "101")
 
+        noisy_docs = [
+            {
+                "url_hash": "201",
+                "url": "https://www.thoughtco.com/j-k-rowling-biography",
+                "title": "J.K. Rowling Biography",
+                "full_text": (
+                    "Author of the Harry Potter Series Evan Agostini/Getty Images "
+                    "Joanne Rowling wrote the Harry Potter fantasy series [9] [10]. "
+                    "Her Harry Potter books became a global phenomenon [citation needed]."
+                ),
+            },
+            {
+                "url_hash": "202",
+                "url": "https://en.wikipedia.org/wiki/CRISPR",
+                "title": "CRISPR - Wikipedia",
+                "full_text": (
+                    "CRISPR (/ ˈ k r ɪ s p ə r /; an acronym for clustered regularly interspaced short palindromic repeats) "
+                    "is a family of DNA sequences found in the genomes of prokaryotic organisms [1][2]."
+                ),
+            },
+        ]
+        snippet_clean = extract_query_focused_snippet("joanne rowling", noisy_docs[0]["full_text"], max_len=240)
+        self.assertNotIn("Getty Images", snippet_clean)
+        self.assertNotIn("[9]", snippet_clean)
+        self.assertIn("Joanne Rowling", snippet_clean)
+
+        hp_clean = synthesize_grounded_answer("who wrote harry potter", noisy_docs[:1])
+        self.assertIsNotNone(hp_clean)
+        self.assertNotIn("Getty Images", hp_clean["summary"])
+        self.assertNotIn("[9]", hp_clean["summary"])
+        self.assertNotIn("citation needed", hp_clean["summary"])
+        self.assertIn("Joanne Rowling", hp_clean["summary"])
+
+        crispr_clean = synthesize_grounded_answer("how does crispr work", noisy_docs[1:])
+        self.assertIsNotNone(crispr_clean)
+        self.assertNotIn("ˈ k r ɪ s p ə r", crispr_clean["summary"])
+        self.assertNotIn("[2]", crispr_clean["summary"])
+        self.assertIn("CRISPR (an acronym", crispr_clean["summary"])
+
     def test_config_rejects_hardcoded_placeholder_keys(self):
         with self.assertRaises(ValidationError):
             CrawlerSettings(INTERNAL_API_KEY="neutron-secret-internal-key")

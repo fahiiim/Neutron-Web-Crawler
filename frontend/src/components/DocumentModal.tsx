@@ -1,351 +1,309 @@
-import DOMPurify from 'dompurify';
-import hljs from 'highlight.js/lib/core';
-import bash from 'highlight.js/lib/languages/bash';
-import javascript from 'highlight.js/lib/languages/javascript';
-import json from 'highlight.js/lib/languages/json';
-import python from 'highlight.js/lib/languages/python';
-import rust from 'highlight.js/lib/languages/rust';
-import sql from 'highlight.js/lib/languages/sql';
-import 'highlight.js/styles/github-dark.css';
-import {
-  ArrowUpRight,
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  Copy,
-  FileText,
-  Loader2,
-  Share2,
-  X,
-} from 'lucide-react';
-import { marked } from 'marked';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { safeHttpUrl } from '../utils/format';
+import React, { useEffect, useRef, useState } from "react";
+import { Check, Copy, ExternalLink, Loader2, X } from "lucide-react";
 
-hljs.registerLanguage('python', python);
-hljs.registerLanguage('javascript', javascript);
-hljs.registerLanguage('rust', rust);
-hljs.registerLanguage('bash', bash);
-hljs.registerLanguage('sql', sql);
-hljs.registerLanguage('json', json);
+export interface ReaderTarget {
+  url: string;
+  urlHash?: string | number;
+  title?: string;
+}
 
-interface TocEntry {
-  id: string;
-  text: string;
-  level: number;
+interface DocumentData {
+  url_hash?: string;
+  url?: string;
+  title?: string;
+  crawled_at?: string;
+  full_markdown?: string;
+  source?: string;
 }
 
 interface DocumentModalProps {
-  open: boolean;
-  urlHash: string | null;
-  initialTitle: string;
-  initialUrl?: string;
-  canPrev: boolean;
-  canNext: boolean;
-  onPrev: () => void;
-  onNext: () => void;
+  target: ReaderTarget | null;
   onClose: () => void;
 }
 
-export function DocumentModal({
-  open,
-  urlHash,
-  initialTitle,
-  initialUrl,
-  canPrev,
-  canNext,
-  onPrev,
-  onNext,
-  onClose,
-}: DocumentModalProps) {
-  const [loading, setLoading] = useState(false);
-  const [title, setTitle] = useState(initialTitle);
-  const [docUrl, setDocUrl] = useState(initialUrl || '');
-  const [rawMarkdown, setRawMarkdown] = useState('');
-  const [scrollPct, setScrollPct] = useState(0);
-  const [toc, setToc] = useState<TocEntry[]>([]);
-  const [copiedMd, setCopiedMd] = useState(false);
-  const [shared, setShared] = useState(false);
+function cleanReaderMarkdown(md: string): string {
+  return md
+    .replace(/\s*\[(?:\d+|citation needed|edit|update)\]/gi, "")
+    .replace(/\[([^\]]+)\]\(#cite_note[^)]+\)/g, "")
+    .trim();
+}
 
-  const scrollAreaRef = useRef<HTMLDivElement>(null);
-  const articleRef = useRef<HTMLElement>(null);
-  const closeBtnRef = useRef<HTMLButtonElement>(null);
+function renderMarkdown(markdown: string): React.ReactNode {
+  const lines = cleanReaderMarkdown(markdown).split(/\r?\n/);
+  const nodes: React.ReactNode[] = [];
+  let i = 0;
 
-  useEffect(() => {
-    if (!open || urlHash === null) return;
-    setTitle(initialTitle || 'Document Reader');
-    setDocUrl(initialUrl || '');
-    setRawMarkdown('');
-    setScrollPct(0);
-    setToc([]);
-    setLoading(true);
-    closeBtnRef.current?.focus();
+  while (i < lines.length) {
+    const line = lines[i];
 
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`/doc/${encodeURIComponent(String(urlHash))}`);
-        if (cancelled) return;
-        if (!res.ok) {
-          setRawMarkdown('Unable to load document payload.');
-          return;
-        }
-        const data = await res.json();
-        if (cancelled) return;
-        if (data.title) setTitle(data.title);
-        if (data.url) setDocUrl(data.url);
-        setRawMarkdown(data.full_markdown || 'No content available.');
-      } catch {
-        if (!cancelled) setRawMarkdown('Connection error while reading document.');
-      } finally {
-        if (!cancelled) setLoading(false);
+    if (line.trim().startsWith("```")) {
+      const codeLines: string[] = [];
+      i++;
+      while (i < lines.length && !lines[i].trim().startsWith("```")) {
+        codeLines.push(lines[i]);
+        i++;
       }
-    })();
+      i++;
+      nodes.push(
+        <pre key={`pre-${i}`}>
+          <code>{codeLines.join("\n")}</code>
+        </pre>,
+      );
+      continue;
+    }
 
-    return () => {
-      cancelled = true;
-    };
-  }, [open, urlHash, initialTitle, initialUrl]);
+    if (line.startsWith("### ")) {
+      nodes.push(<h3 key={`h3-${i}`}>{line.slice(4)}</h3>);
+      i++;
+      continue;
+    }
+    if (line.startsWith("## ")) {
+      nodes.push(<h2 key={`h2-${i}`}>{line.slice(3)}</h2>);
+      i++;
+      continue;
+    }
+    if (line.startsWith("# ")) {
+      nodes.push(<h1 key={`h1-${i}`}>{line.slice(2)}</h1>);
+      i++;
+      continue;
+    }
 
-  const sanitizedHtml = useMemo(() => {
-    if (!rawMarkdown) return '';
-    const html = marked.parse(rawMarkdown, { breaks: true, gfm: true }) as string;
-    return DOMPurify.sanitize(html);
-  }, [rawMarkdown]);
+    if (line.trim().startsWith("> ")) {
+      nodes.push(
+        <blockquote key={`bq-${i}`}>{line.trim().slice(2)}</blockquote>,
+      );
+      i++;
+      continue;
+    }
+
+    if (/^[-*•]\s+/.test(line.trim())) {
+      const items: string[] = [];
+      while (i < lines.length && /^[-*•]\s+/.test(lines[i].trim())) {
+        items.push(lines[i].trim().replace(/^[-*•]\s+/, ""));
+        i++;
+      }
+      nodes.push(
+        <ul key={`ul-${i}`}>
+          {items.map((it, idx) => (
+            <li key={idx}>{it}</li>
+          ))}
+        </ul>,
+      );
+      continue;
+    }
+
+    if (!line.trim()) {
+      i++;
+      continue;
+    }
+
+    const paraLines: string[] = [line.trim()];
+    i++;
+    while (
+      i < lines.length &&
+      lines[i].trim() &&
+      !lines[i].startsWith("#") &&
+      !lines[i].trim().startsWith("```") &&
+      !lines[i].trim().startsWith("> ") &&
+      !/^[-*•]\s+/.test(lines[i].trim())
+    ) {
+      paraLines.push(lines[i].trim());
+      i++;
+    }
+    nodes.push(<p key={`p-${i}`}>{paraLines.join(" ")}</p>);
+  }
+
+  return nodes;
+}
+
+export const DocumentModal: React.FC<DocumentModalProps> = ({
+  target,
+  onClose,
+}) => {
+  const [doc, setDoc] = useState<DocumentData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (!articleRef.current || !sanitizedHtml) {
-      setToc([]);
+    if (!target) {
+      setDoc(null);
+      setError(null);
       return;
     }
-    articleRef.current.querySelectorAll('pre code').forEach((block) => {
-      hljs.highlightElement(block as HTMLElement);
-    });
 
-    const headings = Array.from(
-      articleRef.current.querySelectorAll('h1, h2, h3, h4')
-    );
-    const items: TocEntry[] = headings.map((el, idx) => {
-      const id = `doc-heading-${idx}`;
-      el.id = id;
-      return {
-        id,
-        text: el.textContent || '',
-        level: Number(el.tagName.replace('H', '')) || 1,
-      };
-    });
-    setToc(items);
-    if (scrollAreaRef.current) {
-      scrollAreaRef.current.scrollTop = 0;
+    if (target.urlHash === undefined || target.urlHash === null || target.urlHash === "") {
+      setDoc(null);
+      setLoading(false);
+      setError("Full cached snapshot unavailable for this source.");
+      return;
     }
-  }, [sanitizedHtml]);
+
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+    setProgress(0);
+
+    fetch(`/doc/${encodeURIComponent(String(target.urlHash))}`, {
+      signal: controller.signal,
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          throw new Error(`Unable to load document (${res.status})`);
+        }
+        return res.json();
+      })
+      .then((data) => {
+        setDoc(data);
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (err?.name === "AbortError") return;
+        setError(err?.message || "Failed to load page content");
+        setLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [target]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!target) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-      else if (e.key === 'ArrowLeft' && canPrev) onPrev();
-      else if (e.key === 'ArrowRight' && canNext) onNext();
+      if (e.key === "Escape") onClose();
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, canPrev, canNext, onPrev, onNext, onClose]);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [target, onClose]);
 
-  if (!open) return null;
+  if (!target) return null;
+
+  const markdownContent = doc?.full_markdown || "";
+  const resolvedUrl = doc?.url || target.url;
+
+  let hostLabel = resolvedUrl;
+  try {
+    hostLabel = new URL(resolvedUrl).hostname.replace(/^www\./, "");
+  } catch {
+    hostLabel = resolvedUrl;
+  }
 
   const handleScroll = () => {
-    const el = scrollAreaRef.current;
+    const el = scrollRef.current;
     if (!el) return;
     const max = el.scrollHeight - el.clientHeight;
-    setScrollPct(max > 0 ? Math.min(100, Math.round((el.scrollTop / max) * 100)) : 100);
+    setProgress(max > 0 ? Math.min(100, Math.round((el.scrollTop / max) * 100)) : 0);
   };
 
-  const handleCopyMd = async () => {
-    if (!rawMarkdown) return;
-    await navigator.clipboard.writeText(rawMarkdown);
-    setCopiedMd(true);
-    window.setTimeout(() => setCopiedMd(false), 1500);
-  };
-
-  const handleShare = async () => {
-    if (urlHash === null) return;
-    const url = `${window.location.origin}/?doc=${encodeURIComponent(String(urlHash))}`;
-    await navigator.clipboard.writeText(url);
-    setShared(true);
-    window.setTimeout(() => setShared(false), 1500);
+  const handleCopyMarkdown = async () => {
+    if (!markdownContent) return;
+    try {
+      await navigator.clipboard.writeText(markdownContent);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // Ignore clipboard failures
+    }
   };
 
   return (
     <div
       role="dialog"
       aria-modal="true"
-      aria-labelledby="reader-modal-title"
+      aria-label="Reader view"
+      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-6"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center sm:p-5"
     >
-      <div className="surface-solid w-full h-full sm:h-[86vh] sm:max-w-5xl sm:rounded-2xl flex flex-col overflow-hidden shadow-2xl">
-        {/* Glowy Green Progress Line */}
-        <div className="w-full h-[2px] bg-white/10 shrink-0">
+      <div className="w-full max-w-3xl max-h-[90vh] bg-[#0a0a0a] border border-white/15 rounded-xl flex flex-col overflow-hidden shadow-2xl">
+        <div className="h-[2px] w-full bg-white/10">
           <div
-            className="h-full bg-emerald-400 shadow-[0_0_8px_#4ade80] transition-all duration-100"
-            style={{ width: `${scrollPct}%` }}
+            className="h-full bg-white transition-all duration-150"
+            style={{ width: `${progress}%` }}
           />
         </div>
 
-        {/* Header */}
-        <div className="px-4 sm:px-6 py-3.5 border-b border-white/[0.12] flex items-center justify-between gap-3 shrink-0">
-          <div className="flex items-center space-x-2.5 min-w-0">
-            <FileText className="w-4 h-4 text-emerald-400 shrink-0" />
-            <h2
-              id="reader-modal-title"
-              className="font-varsity text-sm sm:text-base text-white truncate"
-            >
-              {title}
+        <div className="px-5 py-3.5 border-b border-white/10 flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <h2 className="text-sm font-medium text-white truncate">
+              {doc?.title || target.title || resolvedUrl}
             </h2>
+            <p className="text-[11px] font-mono-tech text-neutral-500 truncate mt-0.5">
+              {hostLabel}
+            </p>
           </div>
 
-          <div className="flex items-center space-x-1.5 shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
-              disabled={!canPrev}
-              onClick={onPrev}
-              aria-label="Previous result"
-              className="p-1.5 rounded-lg border border-white/15 text-white hover:text-[#4ade80] disabled:opacity-30 transition-colors"
+              onClick={handleCopyMarkdown}
+              disabled={!markdownContent}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-white/10 hover:border-white/30 text-xs text-neutral-300 hover:text-white disabled:opacity-40 transition-colors cursor-pointer"
             >
-              <ChevronLeft className="w-4 h-4" />
+              {copied ? (
+                <>
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Copied</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Copy text</span>
+                </>
+              )}
             </button>
-            <button
-              type="button"
-              disabled={!canNext}
-              onClick={onNext}
-              aria-label="Next result"
-              className="p-1.5 rounded-lg border border-white/15 text-white hover:text-[#4ade80] disabled:opacity-30 transition-colors"
+
+            <a
+              href={resolvedUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md border border-white/10 hover:border-white/30 text-xs text-neutral-300 hover:text-white transition-colors"
             >
-              <ChevronRight className="w-4 h-4" />
-            </button>
+              <span className="hidden sm:inline">Source</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+
             <button
-              ref={closeBtnRef}
               type="button"
               onClick={onClose}
               aria-label="Close reader"
-              className="p-1.5 rounded-lg text-white hover:bg-white/[0.08] transition-colors ml-1"
+              className="p-1.5 rounded-md text-neutral-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* Body + TOC */}
-        <div className="flex-1 flex overflow-hidden">
-          {toc.length > 0 && (
-            <aside className="hidden md:block w-60 border-r border-white/[0.1] p-4 overflow-y-auto shrink-0">
-              <div className="font-varsity text-[11px] tracking-wider text-glow-green mb-3">
-                CONTENTS
-              </div>
-              <ul className="space-y-1.5 text-xs font-classic">
-                {toc.map((entry) => (
-                  <li key={entry.id}>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        document
-                          .getElementById(entry.id)
-                          ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-                      }
-                      style={{ paddingLeft: `${Math.max(0, entry.level - 1) * 10}px` }}
-                      className="w-full text-left text-white/90 hover:text-[#4ade80] truncate transition-colors py-0.5"
-                    >
-                      {entry.text}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </aside>
-          )}
-
-          <div
-            ref={scrollAreaRef}
-            onScroll={handleScroll}
-            className="flex-1 p-5 sm:p-8 overflow-y-auto"
-          >
-            {loading ? (
-              <div className="flex items-center space-x-2 text-xs font-mono text-glow-green">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Decompressing document from Turso LibSQL...</span>
-              </div>
-            ) : (
-              <article
-                ref={articleRef}
-                className="markdown-prose max-w-3xl text-[15px]"
-                dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
-              />
-            )}
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="px-4 sm:px-6 py-3 border-t border-white/[0.12] flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
-          <div className="flex items-center space-x-2">
-            <button
-              type="button"
-              onClick={handleCopyMd}
-              className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border border-white/20 text-white hover:border-emerald-400/50 transition-colors font-classic"
-            >
-              {copiedMd ? (
-                <>
-                  <Check className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="text-glow-green">Copied</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>Copy Markdown</span>
-                </>
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={handleShare}
-              className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border border-white/20 text-white hover:border-emerald-400/50 transition-colors font-classic"
-            >
-              {shared ? (
-                <>
-                  <Check className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="text-glow-green">Link Copied</span>
-                </>
-              ) : (
-                <>
-                  <Share2 className="w-3.5 h-3.5" />
-                  <span>Share</span>
-                </>
-              )}
-            </button>
-
-            {docUrl && safeHttpUrl(docUrl) !== '#' && (
+        <div
+          ref={scrollRef}
+          onScroll={handleScroll}
+          className="flex-1 overflow-y-auto px-5 sm:px-8 py-6"
+        >
+          {loading ? (
+            <div className="flex items-center gap-2.5 text-sm text-neutral-400 py-12 justify-center">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>Loading document...</span>
+            </div>
+          ) : error ? (
+            <div className="py-10 text-center text-sm text-neutral-400">
+              <p>{error}</p>
               <a
-                href={safeHttpUrl(docUrl)}
+                href={resolvedUrl}
                 target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-lg border border-white/20 text-white hover:border-emerald-400/50 transition-colors font-classic"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 mt-3 text-white underline underline-offset-4"
               >
-                <span>Source</span>
-                <ArrowUpRight className="w-3.5 h-3.5" />
+                Open source page
+                <ExternalLink className="w-3.5 h-3.5" />
               </a>
-            )}
-          </div>
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-1.5 rounded-lg bg-white text-black hover:bg-emerald-300 font-classic font-semibold transition-colors"
-          >
-            Close
-          </button>
+            </div>
+          ) : (
+            <div className="markdown-prose">{renderMarkdown(markdownContent)}</div>
+          )}
         </div>
       </div>
     </div>
   );
-}
+};
