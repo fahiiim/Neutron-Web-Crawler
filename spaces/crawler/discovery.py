@@ -6,7 +6,6 @@ Reddit public JSON, arXiv academic search, GitHub repositories, and optional Bra
 
 import asyncio
 import random
-import re
 import time
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 import urllib.parse
@@ -16,11 +15,13 @@ from selectolax.lexbor import LexborHTMLParser
 
 try:
     from .config import settings
+    from .db_turso import normalize_search_query
     from .dedup import canonicalize_url, extract_domain_host
     from .logging_utils import get_logger
     from .parser import IGNORED_EXTENSIONS
 except ImportError:
     from config import settings
+    from db_turso import normalize_search_query
     from dedup import canonicalize_url, extract_domain_host
     from logging_utils import get_logger
     from parser import IGNORED_EXTENSIONS
@@ -48,6 +49,13 @@ NEUTRON_BOT_AGENT = (
     "NeutronSearchEngine/3.0 (https://github.com/fahiiim/Neutron-Web-Crawler)"
 )
 
+_MULTI_ARTICLE_DOMAINS = {
+    "en.wikipedia.org",
+    "arxiv.org",
+    "github.com",
+    "stackoverflow.com",
+}
+
 
 def _pick_user_agent() -> str:
     return random.choice(CHROME_USER_AGENTS)
@@ -55,14 +63,7 @@ def _pick_user_agent() -> str:
 
 def _strip_question_framing(query: str) -> str:
     """Normalize conversational question queries to extract key search entities."""
-    cleaned = re.sub(
-        r"^(what\s+is\s+(the\s+)?(name\s+of\s+)?|who\s+is\s+(the\s+)?|"
-        r"tell\s+me\s+about\s+|can\s+you\s+find\s+|how\s+to\s+|which\s+is\s+)",
-        "",
-        query.strip(),
-        flags=re.IGNORECASE,
-    ).strip()
-    return cleaned if cleaned else query.strip()
+    return normalize_search_query(query)
 
 
 async def _discover_duckduckgo_html(client: httpx.AsyncClient, query: str) -> List[str]:
@@ -325,22 +326,41 @@ async def discover_seed_urls_detailed(
         for src in ordered_sources:
             discovered.extend(by_source.get(src, []))
 
-    seen_domains: Set[str] = set()
+    seen_domains: Dict[str, int] = {}
+    seen_urls: Set[str] = set()
     diverse_urls: List[str] = []
 
+    candidates_clean: List[Tuple[str, str]] = []
     for raw_url in discovered:
         canonical = canonicalize_url(raw_url)
-        if not canonical:
+        if not canonical or canonical in seen_urls:
             continue
         url_path = urllib.parse.urlsplit(canonical).path.lower()
         if url_path.endswith(IGNORED_EXTENSIONS):
             continue
-        domain = extract_domain_host(canonical)
+        seen_urls.add(canonical)
+        candidates_clean.append((canonical, extract_domain_host(canonical)))
+
+    # Pass 1: maximize domain diversity (1 URL per domain)
+    for canonical, domain in candidates_clean:
         if domain not in seen_domains:
-            seen_domains.add(domain)
+            seen_domains[domain] = 1
             diverse_urls.append(canonical)
         if len(diverse_urls) >= max_urls:
             break
+
+    # Pass 2: backfill remaining slots from multi-article knowledge hubs when needed
+    if len(diverse_urls) < max_urls:
+        selected_set = set(diverse_urls)
+        for canonical, domain in candidates_clean:
+            if canonical in selected_set or domain not in _MULTI_ARTICLE_DOMAINS:
+                continue
+            if seen_domains.get(domain, 0) < 2:
+                seen_domains[domain] = seen_domains.get(domain, 0) + 1
+                diverse_urls.append(canonical)
+                selected_set.add(canonical)
+            if len(diverse_urls) >= max_urls:
+                break
 
     return diverse_urls, metrics
 

@@ -182,10 +182,38 @@ class TestParserAndSecurity(unittest.TestCase):
             ["elit", "us", "army", "force"],
         )
         self.assertEqual(
+            sanitize_fts_terms("how does crispr gene editing work"),
+            ["crispr", "gene", "editing"],
+        )
+        self.assertEqual(
+            sanitize_fts_terms("what to do to make me safe from being volcanized"),
+            ["safe", "volcanized"],
+        )
+        self.assertEqual(
             sanitize_fts_terms("domain name system"),
             ["domain", "name", "system"],
         )
         self.assertEqual(sanitize_fts_terms("   ???   "), [])
+
+    def test_wikipedia_nav_and_lead_prose_snippet(self):
+        wiki_html = """
+        <html><head><title>J. K. Rowling - Wikipedia</title></head>
+        <body>
+            <a class="mw-jump-link" href="#bodyContent">Jump to content</a>
+            <main>
+                <div id="p-lang-btn"><ul><li>Arabiya</li><li>Deutsch</li></ul></div>
+                <div id="mw-content-text"><div class="mw-parser-output">
+                    <h1>J. K. Rowling</h1>
+                    <ul><li>Born 31 July 1965</li></ul>
+                    <p>Joanne Rowling, known by her pen name J. K. Rowling, is a British author who wrote the Harry Potter fantasy series.</p>
+                </div></div>
+            </main>
+        </body></html>
+        """
+        parsed = parse_page_content(wiki_html, "https://en.wikipedia.org/wiki/J._K._Rowling")
+        self.assertNotIn("Jump to content", parsed["snippet"])
+        self.assertNotIn("Deutsch", parsed["text"])
+        self.assertIn("Harry Potter fantasy series", parsed["snippet"])
 
     def test_waf_interstitial_detection_and_h1_title_fallback(self):
         self.assertTrue(
@@ -226,6 +254,7 @@ class TestParserAndSecurity(unittest.TestCase):
     def test_strip_question_framing(self):
         self.assertEqual(_strip_question_framing("What is the name of neutron star"), "neutron star")
         self.assertEqual(_strip_question_framing("How to build a crawler"), "build a crawler")
+        self.assertEqual(_strip_question_framing("How does CRISPR gene editing work?"), "CRISPR gene editing")
 
     def test_compute_opic_authority_ranges(self):
         low = crawler_app_module.compute_opic_authority("http://random.site/a/b/c/d", {"text": "short"})
@@ -378,6 +407,30 @@ class TestAsyncCrawlerModules(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(doc)
         mock_insert.assert_not_awaited()
 
+    async def test_fetch_and_index_skips_off_topic_live_query_hit(self):
+        unrelated_html = (
+            "<html><head><title>Tutorials for GitHub Copilot</title></head><body><article>"
+            "<p>Learn how to write prompts and autocomplete workflows inside Visual Studio Code extensions.</p>"
+            "</article></body></html>"
+        )
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(
+            return_value=MagicMock(
+                status_code=200,
+                headers={"content-type": "text/html"},
+                text=unrelated_html,
+            )
+        )
+        with patch.object(crawler_app_module.turso_crawler_client, "insert_search_index", AsyncMock()) as mock_insert:
+            doc = await crawler_app_module.fetch_and_index_document(
+                mock_session,
+                "https://docs.example.org/copilot",
+                check_robots=False,
+                query="how does crispr gene editing work",
+            )
+        self.assertIsNone(doc)
+        mock_insert.assert_not_awaited()
+
     async def test_fetch_and_index_skips_bloom_seen_when_enabled(self):
         test_url = "https://seen.example.org/article"
         crawler_app_module.url_bloom.add(test_url)
@@ -476,6 +529,22 @@ class TestAsyncCrawlerModules(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(hits[0]["url"], u_url)
                 self.assertEqual(hits[0]["url_hash"], str(u_hash))
                 self.assertIsNotNone(hits[0]["crawled_at"])
+
+                # Multi-word search must NOT return irrelevant 1-word matches (e.g., "fastapi" missing)
+                self.assertEqual(
+                    await client.search("fastapi middleware crawler", limit=5),
+                    [],
+                )
+                # Two-word search must NOT dilute to single-word hits
+                self.assertEqual(
+                    await client.search("quantum crawler", limit=5),
+                    [],
+                )
+                # 3-of-4 quorum matches genuinely overlapping 4-term concepts (1 word missing/typo)
+                self.assertEqual(
+                    len(await client.search("neutron pulsar rust guidebook", limit=5)),
+                    1,
+                )
 
                 payload = await client.get_document_payload(u_hash)
                 self.assertEqual(decompress_text(payload), doc_text)

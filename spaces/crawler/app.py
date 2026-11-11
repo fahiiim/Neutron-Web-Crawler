@@ -60,7 +60,7 @@ try:
     from .bloom import URLBloomFilter
     from .compression import compress_text, decompress_text
     from .config import settings
-    from .db_turso import turso_crawler_client
+    from .db_turso import score_document_relevance, turso_crawler_client
     from .dedup import (
         canonicalize_url,
         compute_simhash,
@@ -78,7 +78,7 @@ except ImportError:
     from bloom import URLBloomFilter
     from compression import compress_text, decompress_text
     from config import settings
-    from db_turso import turso_crawler_client
+    from db_turso import score_document_relevance, turso_crawler_client
     from dedup import (
         canonicalize_url,
         compute_simhash,
@@ -428,7 +428,9 @@ async def search_endpoint(
         if fetch_targets:
             async with AsyncSession(impersonate="chrome124") as session:
                 tasks = [
-                    fetch_and_index_document(session, url, check_robots=True)
+                    fetch_and_index_document(
+                        session, url, check_robots=True, query=clean_query
+                    )
                     for url in fetch_targets
                 ]
                 outcomes = await asyncio.gather(*tasks, return_exceptions=True)
@@ -443,6 +445,19 @@ async def search_endpoint(
         if url and url not in seen_urls:
             seen_urls.add(url)
             merged.append(hit)
+
+    merged.sort(
+        key=lambda h: (
+            score_document_relevance(
+                clean_query,
+                h.get("title", ""),
+                h.get("snippet", ""),
+                h.get("url", ""),
+            )[0],
+            float(h.get("score") or 0.0),
+        ),
+        reverse=True,
+    )
 
     return {
         "query": clean_query,
@@ -559,7 +574,7 @@ async def search_stream(
                             return
 
                         doc = await fetch_and_index_document(
-                            session, target_url, check_robots=False
+                            session, target_url, check_robots=False, query=clean_query
                         )
                         dur_ms = round((time.perf_counter() - t0) * 1000)
                         if doc:
@@ -669,6 +684,7 @@ async def fetch_and_index_document(
     url: str,
     check_robots: bool = True,
     skip_if_seen: bool = False,
+    query: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Fetch URL with TLS impersonation, retry, dedup, parse, and index."""
     canonical = canonicalize_url(url) or url
@@ -733,6 +749,19 @@ async def fetch_and_index_document(
             logger.info("waf_or_empty_skipped", url=canonical)
             return None
 
+        relevance_boost = 0.0
+        if query:
+            matched_cnt, relevance_boost = score_document_relevance(
+                query,
+                extracted.get("title", ""),
+                extracted.get("snippet", ""),
+                canonical,
+                extracted.get("text", ""),
+            )
+            if matched_cnt == 0:
+                logger.info("off_topic_live_skipped", url=canonical, query=query)
+                return None
+
         url_id = hash_url(canonical)
         domain_host = extract_domain_host(canonical)
         domain_id = hash_domain(domain_host)
@@ -793,7 +822,7 @@ async def fetch_and_index_document(
             "url": canonical,
             "title": extracted["title"],
             "snippet": extracted["snippet"],
-            "score": opic_score,
+            "score": round(opic_score + relevance_boost, 4),
             "crawled_at": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
         }
     except Exception as exc:
@@ -811,7 +840,7 @@ async def crawl_jit_endpoint(request: JITCrawlRequest) -> Dict[str, Any]:
     results: List[Dict[str, Any]] = []
     async with AsyncSession(impersonate="chrome124") as session:
         tasks = [
-            fetch_and_index_document(session, url, check_robots=True)
+            fetch_and_index_document(session, url, check_robots=True, query=request.query)
             for url in candidates
         ]
         outcomes = await asyncio.gather(*tasks, return_exceptions=True)

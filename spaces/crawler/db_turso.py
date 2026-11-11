@@ -1,7 +1,9 @@
 """Database client for managing index insertions, frontier queues, and search in Turso."""
 
+import itertools
+import math
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import libsql_client
 
 try:
@@ -21,30 +23,58 @@ STOP_WORDS = {
     "a", "about", "above", "after", "again", "against", "all", "also", "am", "an",
     "and", "any", "are", "as", "at", "be", "because", "been", "before", "being",
     "below", "between", "both", "but", "by", "can", "could", "did", "do", "does",
-    "doing", "down", "during", "each", "few", "for", "from", "further", "get", "go",
-    "had", "has", "have", "having", "he", "her", "here", "hers", "herself", "him",
-    "himself", "his", "how", "i", "if", "in", "into", "is", "it", "its", "itself",
-    "just", "like", "me", "more", "most", "my", "myself", "no", "nor", "not", "of",
-    "off", "on", "once", "only", "or", "other", "our", "ours", "ourselves", "out",
-    "over", "own", "same", "she", "should", "so", "some", "such", "than", "that",
-    "the", "their", "theirs", "them", "themselves", "then", "there", "these", "they",
-    "this", "those", "through", "to", "too", "under", "until", "up", "very", "was",
-    "we", "were", "what", "when", "where", "which", "while", "who", "whom", "why",
+    "doing", "down", "during", "each", "explain", "few", "for", "from", "further",
+    "get", "getting", "go", "had", "has", "have", "having", "he", "her", "here",
+    "hers", "herself", "him", "himself", "his", "how", "i", "if", "in", "into",
+    "is", "it", "its", "itself", "just", "like", "me", "more", "most", "my",
+    "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other",
+    "our", "ours", "ourselves", "out", "over", "own", "please", "same", "she",
+    "should", "so", "some", "such", "tell", "than", "that", "the", "their",
+    "theirs", "them", "themselves", "then", "there", "these", "they", "this",
+    "those", "through", "to", "too", "under", "until", "up", "very", "was", "we",
+    "were", "what", "when", "where", "which", "while", "who", "whom", "why",
     "will", "with", "would", "you", "your", "yours", "yourself", "yourselves",
 }
 
+_SYNONYM_GROUPS = {
+    "us": '("us" OR "usa")',
+    "usa": '("usa" OR "us")',
+}
 
 _QUESTION_PREFIX_RE = re.compile(
-    r"^(what\s+is\s+(the\s+)?(name\s+of\s+)?|who\s+is\s+(the\s+)?|"
-    r"tell\s+me\s+about\s+|can\s+you\s+find\s+|how\s+to\s+|which\s+is\s+)",
+    r"^(what\s+(?:is|are|was|were|does|do|to\s+do\s+to(?:\s+make\s+me)?)\s+(?:the\s+)?(?:name\s+of\s+)?|"
+    r"who\s+(?:is|are|was|were|invented|wrote|created)\s+(?:the\s+)?|"
+    r"how\s+(?:does|do|did|can|to)\s+|"
+    r"why\s+(?:does|do|did|is|are)\s+|"
+    r"tell\s+me\s+about\s+|"
+    r"can\s+you\s+(?:tell\s+me|find|explain)\s+|"
+    r"explain\s+|"
+    r"which\s+(?:is|are)\s+)",
+    flags=re.IGNORECASE,
+)
+
+_LEADING_QUESTION_RE = re.compile(
+    r"^(what|who|how|why|which|where|when|tell|can|explain)\b",
     flags=re.IGNORECASE,
 )
 
 
+def normalize_search_query(query: str) -> str:
+    """Strip conversational question framing while preserving entity keywords."""
+    raw = (query or "").strip()
+    if not raw:
+        return ""
+    is_question = bool(_LEADING_QUESTION_RE.match(raw)) or raw.endswith("?")
+    cleaned = _QUESTION_PREFIX_RE.sub("", raw).strip()
+    if is_question:
+        cleaned = re.sub(r"\s+(?:works?|working)\??$", "", cleaned, flags=re.IGNORECASE)
+        cleaned = cleaned.rstrip("?!.").strip()
+    return cleaned if cleaned else raw.rstrip("?!.").strip()
+
+
 def sanitize_fts_terms(query: str) -> List[str]:
     """Normalize conversational prefixes, extract safe tokens, and strip FTS5 syntax."""
-    stripped = _QUESTION_PREFIX_RE.sub("", (query or "").strip()).strip()
-    source_text = stripped if stripped else (query or "")
+    source_text = normalize_search_query(query)
     tokens = re.findall(r"[a-zA-Z0-9]+", source_text.lower())
     if not tokens:
         return []
@@ -71,6 +101,65 @@ def sanitize_fts_terms(query: str) -> List[str]:
         if len(unique_terms) >= 8:
             break
     return unique_terms
+
+
+def _format_fts_term(term: str) -> str:
+    """Format an exact Porter-stemmed FTS5 token (expanding safe aliases)."""
+    return _SYNONYM_GROUPS.get(term, f'"{term}"')
+
+
+def _term_matches_text(term: str, low_text: str) -> bool:
+    """Check whether a query term (or >=4-char typo stem prefix / us<->usa) matches text."""
+    if not low_text:
+        return False
+    if term == "us":
+        return bool(re.search(r"\b(?:us|u\.s\.?|usa|united states)\b", low_text))
+    if term == "usa":
+        return bool(re.search(r"\b(?:usa|us|u\.s\.?|united states)\b", low_text))
+    if re.search(rf"\b{re.escape(term)}\w*", low_text):
+        return True
+    if len(term) >= 4:
+        stem = term[: max(4, min(len(term) - 1, 5))]
+        return bool(re.search(rf"\b{re.escape(stem)}\w*", low_text))
+    return False
+
+
+def score_document_relevance(
+    query: str,
+    title: str,
+    snippet: str,
+    url: str,
+    body_text: str = "",
+) -> Tuple[int, float]:
+    """Compute matched query concept count and relevance boost across document fields."""
+    terms = sanitize_fts_terms(query)
+    if not terms:
+        return 0, 0.0
+
+    low_title = (title or "").lower()
+    low_snippet = (snippet or "").lower()
+    low_url = (url or "").lower().replace("-", " ").replace("_", " ").replace("/", " ")
+    low_body = (body_text or "")[:6000].lower()
+
+    matched_terms = 0
+    score = 0.0
+    for term in terms:
+        in_title = _term_matches_text(term, low_title)
+        in_url = _term_matches_text(term, low_url)
+        in_snippet = _term_matches_text(term, low_snippet)
+        in_body = _term_matches_text(term, low_body)
+        if in_title or in_url or in_snippet or in_body:
+            matched_terms += 1
+        if in_title:
+            score += 4.0
+        if in_url:
+            score += 1.5
+        if in_snippet:
+            score += 1.5
+        elif in_body:
+            score += 0.8
+
+    return matched_terms, round(score, 3)
 
 
 class TursoCrawlerClient:
@@ -132,7 +221,7 @@ class TursoCrawlerClient:
             s.snippet,
             s.opic_authority,
             s.crawled_at,
-            bm25(search_fts, 2.0, 1.0, 0.5) AS bm25_rank
+            bm25(search_fts, 4.0, 1.5, 0.5) AS bm25_rank
         FROM search_fts f
         JOIN search_index s ON f.rowid = s.url_hash
         WHERE search_fts MATCH ?
@@ -164,19 +253,25 @@ class TursoCrawlerClient:
             return []
 
     async def search(self, query: str, limit: int = 15) -> List[Dict[str, Any]]:
-        """Execute BM25 full-text search with sanitized AND -> OR cascade."""
+        """Execute high-precision stemmed AND -> multi-term quorum FTS5 search."""
         terms = sanitize_fts_terms(query)
         if not terms:
             return []
 
-        and_pattern = " ".join([f'"{term}"*' for term in terms])
+        and_pattern = " ".join(_format_fts_term(term) for term in terms)
         hits = await self._execute_fts(and_pattern, limit)
 
-        if len(hits) < 3 and len(terms) > 1:
-            or_pattern = " OR ".join([f'"{term}"*' for term in terms])
-            or_hits = await self._execute_fts(or_pattern, limit)
+        # For 4+ terms, allow high-threshold quorum (>= 70%, min 3 terms) for typo resilience
+        if len(terms) >= 4 and len(hits) < limit:
+            core = terms[:6]
+            quorum = max(3, min(len(core) - 1, math.ceil(len(core) * 0.7)))
+            quorum_clauses = [
+                "(" + " ".join(_format_fts_term(t) for t in comb) + ")"
+                for comb in itertools.combinations(core, quorum)
+            ]
+            quorum_hits = await self._execute_fts(" OR ".join(quorum_clauses), limit)
             seen_hashes = {h["url_hash"] for h in hits}
-            for item in or_hits:
+            for item in quorum_hits:
                 if item["url_hash"] not in seen_hashes:
                     hits.append(item)
                     seen_hashes.add(item["url_hash"])

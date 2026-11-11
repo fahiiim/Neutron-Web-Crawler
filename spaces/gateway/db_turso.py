@@ -1,5 +1,7 @@
 """Database client for querying Turso (LibSQL / SQLite FTS5) and reading payloads."""
 
+import itertools
+import math
 import re
 from typing import Any, Dict, List, Optional
 import libsql_client
@@ -18,28 +20,56 @@ _STOP_WORDS = {
     "a", "about", "above", "after", "again", "against", "all", "also", "am", "an",
     "and", "any", "are", "as", "at", "be", "because", "been", "before", "being",
     "below", "between", "both", "but", "by", "can", "could", "did", "do", "does",
-    "doing", "down", "during", "each", "few", "for", "from", "further", "get", "go",
-    "had", "has", "have", "having", "he", "her", "here", "hers", "herself", "him",
-    "himself", "his", "how", "i", "if", "in", "into", "is", "it", "its", "itself",
-    "just", "like", "me", "more", "most", "my", "myself", "no", "nor", "not", "of",
-    "off", "on", "once", "only", "or", "other", "our", "ours", "ourselves", "out",
-    "over", "own", "same", "she", "should", "so", "some", "such", "than", "that",
-    "the", "their", "theirs", "them", "themselves", "then", "there", "these", "they",
-    "this", "those", "through", "to", "too", "under", "until", "up", "very", "was",
-    "we", "were", "what", "when", "where", "which", "while", "who", "whom", "why",
+    "doing", "down", "during", "each", "explain", "few", "for", "from", "further",
+    "get", "getting", "go", "had", "has", "have", "having", "he", "her", "here",
+    "hers", "herself", "him", "himself", "his", "how", "i", "if", "in", "into",
+    "is", "it", "its", "itself", "just", "like", "me", "more", "most", "my",
+    "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other",
+    "our", "ours", "ourselves", "out", "over", "own", "please", "same", "she",
+    "should", "so", "some", "such", "tell", "than", "that", "the", "their",
+    "theirs", "them", "themselves", "then", "there", "these", "they", "this",
+    "those", "through", "to", "too", "under", "until", "up", "very", "was", "we",
+    "were", "what", "when", "where", "which", "while", "who", "whom", "why",
     "will", "with", "would", "you", "your", "yours", "yourself", "yourselves",
 }
 
+_SYNONYM_GROUPS = {
+    "us": '("us" OR "usa")',
+    "usa": '("usa" OR "us")',
+}
+
 _QUESTION_PREFIX_RE = re.compile(
-    r"^(what\s+is\s+(the\s+)?(name\s+of\s+)?|who\s+is\s+(the\s+)?|"
-    r"tell\s+me\s+about\s+|can\s+you\s+find\s+|how\s+to\s+|which\s+is\s+)",
+    r"^(what\s+(?:is|are|was|were|does|do|to\s+do\s+to(?:\s+make\s+me)?)\s+(?:the\s+)?(?:name\s+of\s+)?|"
+    r"who\s+(?:is|are|was|were|invented|wrote|created)\s+(?:the\s+)?|"
+    r"how\s+(?:does|do|did|can|to)\s+|"
+    r"why\s+(?:does|do|did|is|are)\s+|"
+    r"tell\s+me\s+about\s+|"
+    r"can\s+you\s+(?:tell\s+me|find|explain)\s+|"
+    r"explain\s+|"
+    r"which\s+(?:is|are)\s+)",
+    flags=re.IGNORECASE,
+)
+
+_LEADING_QUESTION_RE = re.compile(
+    r"^(what|who|how|why|which|where|when|tell|can|explain)\b",
     flags=re.IGNORECASE,
 )
 
 
+def _normalize_query(query: str) -> str:
+    raw = (query or "").strip()
+    if not raw:
+        return ""
+    is_question = bool(_LEADING_QUESTION_RE.match(raw)) or raw.endswith("?")
+    cleaned = _QUESTION_PREFIX_RE.sub("", raw).strip()
+    if is_question:
+        cleaned = re.sub(r"\s+(?:works?|working)\??$", "", cleaned, flags=re.IGNORECASE)
+        cleaned = cleaned.rstrip("?!.").strip()
+    return cleaned if cleaned else raw.rstrip("?!.").strip()
+
+
 def _sanitize_terms(query: str) -> List[str]:
-    stripped = _QUESTION_PREFIX_RE.sub("", (query or "").strip()).strip()
-    source_text = stripped if stripped else (query or "")
+    source_text = _normalize_query(query)
     tokens = re.findall(r"[a-zA-Z0-9]+", source_text.lower())
     if not tokens:
         return []
@@ -112,7 +142,7 @@ class TursoSearchClient:
             s.snippet,
             s.opic_authority,
             s.crawled_at,
-            bm25(search_fts, 2.0, 1.0, 0.5) AS bm25_rank
+            bm25(search_fts, 4.0, 1.5, 0.5) AS bm25_rank
         FROM search_fts f
         JOIN search_index s ON f.rowid = s.url_hash
         WHERE search_fts MATCH ?
@@ -144,18 +174,23 @@ class TursoSearchClient:
             return []
 
     async def search(self, query: str, limit: int = 15) -> List[Dict[str, Any]]:
-        """Execute sanitized BM25 full-text query against SQLite FTS5 index."""
+        """Execute high-precision stemmed AND -> multi-term quorum FTS5 search."""
         terms = _sanitize_terms(query)
         if not terms:
             return []
 
-        and_pattern = " ".join([f'"{t}"*' for t in terms])
+        and_pattern = " ".join(_SYNONYM_GROUPS.get(t, f'"{t}"') for t in terms)
         hits = await self._execute_fts(and_pattern, limit)
-        if len(hits) < 3 and len(terms) > 1:
-            or_pattern = " OR ".join([f'"{t}"*' for t in terms])
-            or_hits = await self._execute_fts(or_pattern, limit)
+        if len(terms) >= 4 and len(hits) < limit:
+            core = terms[:6]
+            quorum = max(3, min(len(core) - 1, math.ceil(len(core) * 0.7)))
+            quorum_clauses = [
+                "(" + " ".join(_SYNONYM_GROUPS.get(t, f'"{t}"') for t in comb) + ")"
+                for comb in itertools.combinations(core, quorum)
+            ]
+            quorum_hits = await self._execute_fts(" OR ".join(quorum_clauses), limit)
             seen = {h["url_hash"] for h in hits}
-            for item in or_hits:
+            for item in quorum_hits:
                 if item["url_hash"] not in seen:
                     hits.append(item)
                     seen.add(item["url_hash"])

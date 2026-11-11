@@ -1,6 +1,7 @@
 """High-speed HTML parsing, SSR JSON/JSON-LD extraction, and outbound link discovery."""
 
 import json
+import re
 from typing import Any, Dict, List, Optional, Set
 import urllib.parse
 
@@ -26,6 +27,8 @@ IGNORED_EXTENSIONS = (
 _NOFOLLOW_TOKENS = {"nofollow", "sponsored", "ugc"}
 
 _MAIN_CONTENT_SELECTORS = (
+    ".mw-parser-output",
+    "#mw-content-text",
     "article",
     "main",
     "[role='main']",
@@ -41,8 +44,22 @@ _BLOCK_SELECTORS = (
 
 _JUNK_SELECTORS = (
     "script, style, noscript, svg, nav, footer, aside, "
-    "[role='navigation'], [role='complementary'], "
-    ".cookie-banner, .cookie-consent, .advertisement, .ads, .sidebar"
+    "[role='navigation'], [role='complementary'], [role='search'], "
+    ".cookie-banner, .cookie-consent, .advertisement, .ads, .sidebar, "
+    ".mw-jump-link, .vector-menu, .vector-dropdown, .vector-page-toolbar, "
+    ".mw-editsection, #p-lang-btn, .interlanguage-link, .catlinks, "
+    ".navbox, .ambox, .mbox-small, .mw-disambig, .skip-link, .site-header, .navbar"
+)
+
+_NAV_NOISE_PREFIXES = (
+    "jump to content",
+    "skip to content",
+    "main menu",
+    "search please fill out",
+    "navigation main page",
+    "sign in",
+    "log in",
+    "donate create account",
 )
 
 _WAF_EXACT_TITLES = {
@@ -175,10 +192,62 @@ def _extract_json_ld_metadata(tree: HTMLParser) -> Dict[str, Optional[str]]:
     return meta
 
 
+def _is_nav_noise(text: str) -> bool:
+    """Return True if extracted block looks like leftover site chrome/navigation."""
+    low = " ".join((text or "").lower().split())
+    return any(low.startswith(prefix) for prefix in _NAV_NOISE_PREFIXES)
+
+
+def extract_lead_prose_from_blocks(
+    text_blocks: List[str],
+    title: str = "",
+    max_len: int = 450,
+) -> str:
+    """Pick clean opening prose paragraphs while skipping headings, bullets, and nav noise."""
+    norm_title = " ".join((title or "").lower().split())
+
+    def _collect(allow_bullets: bool) -> str:
+        chosen: List[str] = []
+        total_len = 0
+        for block in text_blocks:
+            stripped = block.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if not allow_bullets and stripped.startswith(("- ", "* ", "• ")):
+                continue
+            clean = stripped.lstrip(">-*• ").strip()
+            if len(clean) < 35 or _is_nav_noise(clean):
+                continue
+            if norm_title and " ".join(clean.lower().split()) == norm_title:
+                continue
+            chosen.append(clean)
+            total_len += len(clean) + 1
+            if len(chosen) >= 2 or total_len >= max_len:
+                break
+        return " ".join(chosen)[:max_len].strip()
+
+    return _collect(allow_bullets=False) or _collect(allow_bullets=True)
+
+
+_PUNCT_SPACE_RE = re.compile(r"\s+([.,;:!?)\]])")
+_OPEN_BRACKET_SPACE_RE = re.compile(r"([(\[])\s+")
+
+
+def _clean_node_text(node: Any) -> str:
+    """Extract readable text preserving spaces across inline HTML tags."""
+    try:
+        raw = node.text(separator=" ", strip=True)
+    except TypeError:
+        raw = node.text(strip=True)
+    spaced = " ".join((raw or "").split())
+    spaced = _PUNCT_SPACE_RE.sub(r"\1", spaced)
+    return _OPEN_BRACKET_SPACE_RE.sub(r"\1", spaced)
+
+
 def _format_node_as_markdown(node: Any) -> Optional[str]:
     """Convert a parsed HTML block node into clean Markdown syntax."""
     tag = (node.tag or "").lower()
-    text = node.text(strip=True)
+    text = _clean_node_text(node)
     if not text:
         return None
 
@@ -277,22 +346,52 @@ def parse_page_content(html: str, base_url: str) -> Dict[str, Any]:
             break
 
     text_blocks: List[str] = []
+    prose_candidates: List[str] = []
     seen_blocks: Set[str] = set()
     for node in scope_node.css(_BLOCK_SELECTORS):
         md_line = _format_node_as_markdown(node)
-        if not md_line:
+        if not md_line or _is_nav_noise(md_line):
             continue
         norm_key = md_line.lstrip("#>- ").strip()
         if norm_key in seen_blocks:
             continue
         seen_blocks.add(norm_key)
         text_blocks.append(md_line)
+        if (node.tag or "").lower() == "p":
+            parent = node.parent
+            in_table = False
+            while parent is not None:
+                if (parent.tag or "").lower() in ("table", "td", "th", "figcaption"):
+                    in_table = True
+                    break
+                parent = parent.parent
+            if not in_table:
+                prose_candidates.append(md_line)
 
     full_text = "\n\n".join(text_blocks)
     if len(full_text) < 120 and json_ld.get("article_body"):
         full_text = f"# {title}\n\n{json_ld['article_body']}"
 
-    if not snippet and text_blocks:
+    lead_prose = (
+        extract_lead_prose_from_blocks(prose_candidates, title=title, max_len=450)
+        or extract_lead_prose_from_blocks(text_blocks, title=title, max_len=450)
+    )
+    clean_meta_desc = " ".join((snippet or "").split())
+    if clean_meta_desc and _is_nav_noise(clean_meta_desc):
+        clean_meta_desc = ""
+    if clean_meta_desc and clean_meta_desc.lower() == title.lower():
+        clean_meta_desc = ""
+
+    if clean_meta_desc and lead_prose:
+        if len(clean_meta_desc) < 180 and clean_meta_desc[:40].lower() not in lead_prose.lower():
+            snippet = f"{clean_meta_desc} — {lead_prose}"[:450]
+        else:
+            snippet = clean_meta_desc[:450]
+    elif clean_meta_desc:
+        snippet = clean_meta_desc[:450]
+    elif lead_prose:
+        snippet = lead_prose[:450]
+    elif text_blocks:
         snippet = text_blocks[0].lstrip("#>- ").strip()[:300]
 
     is_waf_blocked = is_waf_or_empty_page(title, full_text)
@@ -302,7 +401,7 @@ def parse_page_content(html: str, base_url: str) -> Dict[str, Any]:
 
     return {
         "title": title[:200],
-        "snippet": snippet[:400] if snippet else full_text[:400],
+        "snippet": snippet[:450] if snippet else full_text[:450],
         "text": full_text,
         "is_spa_empty": is_spa_empty,
         "is_waf_blocked": is_waf_blocked,
