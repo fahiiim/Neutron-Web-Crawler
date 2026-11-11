@@ -336,8 +336,9 @@ class TestParserAndSecurity(unittest.TestCase):
                 "url": "https://en.wikipedia.org/wiki/CRISPR",
                 "title": "CRISPR - Wikipedia",
                 "full_text": (
-                    "CRISPR (/ ˈ k r ɪ s p ə r /; an acronym for clustered regularly interspaced short palindromic repeats) "
-                    "is a family of DNA sequences found in the genomes of prokaryotic organisms [1][2]."
+                    "CRISPR (/ ˈ k r ɪ s p ə r /; (an acronym for clustered regularly interspaced short palindromic repeats) "
+                    "is a family of DNA sequences found in the genomes of prokaryotic organisms [1][2]. "
+                    "View image online (https://example.org/img.png)"
                 ),
             },
         ]
@@ -356,6 +357,8 @@ class TestParserAndSecurity(unittest.TestCase):
         crispr_clean = synthesize_grounded_answer("how does crispr work", noisy_docs[1:])
         self.assertIsNotNone(crispr_clean)
         self.assertNotIn("ˈ k r ɪ s p ə r", crispr_clean["summary"])
+        self.assertNotIn("((", crispr_clean["summary"])
+        self.assertNotIn("View image online", crispr_clean["summary"])
         self.assertNotIn("[2]", crispr_clean["summary"])
         self.assertIn("CRISPR (an acronym", crispr_clean["summary"])
 

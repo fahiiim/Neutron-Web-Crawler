@@ -57,12 +57,14 @@ _DEFINITION_CUE_RE = re.compile(
 def _sanitize_prose(text: str) -> str:
     """Remove markdown URLs, footnote brackets, Wikipedia IPA, and photo credits."""
     s = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    s = re.sub(r"(?:View image online\s*)?\(https?://[^)\s]+\)", "", s, flags=re.IGNORECASE)
     s = _INLINE_REF_RE.sub("", s)
     s = _PHOTO_CREDIT_PARENS_RE.sub("", s)
     s = _PHOTO_CREDIT_PREFIX_RE.sub("", s)
     s = _IPA_PARENS_RE.sub("", s)
     s = re.sub(r"\s*(?:\(\s*listen\s*\)|ⓘ)\s*", " ", s, flags=re.IGNORECASE)
     s = _EMPTY_PAREN_SEP_RE.sub("(", s)
+    s = re.sub(r"\(\s*\(", "(", s)
     s = re.sub(r"\(\s*\)", "", s)
     return re.sub(r"\s{2,}", " ", s).strip()
 
