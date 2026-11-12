@@ -51,7 +51,7 @@ jobs:
   database-migration:
     name: Apply Turso Database Migrations
     needs: test
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') && secrets.TURSO_DATABASE_URL != '' && secrets.TURSO_AUTH_TOKEN != ''
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     env:
       TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
@@ -71,4 +71,8 @@ jobs:
 
       - name: Run Schema Migration Against Turso
         run: |
-          python scripts/init_turso.py
+          if [ -n "$TURSO_DATABASE_URL" ] && [ -n "$TURSO_AUTH_TOKEN" ]; then
+            python scripts/init_turso.py
+          else
+            echo "Skipping Turso migration: repository secrets not set."
+          fi
