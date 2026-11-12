@@ -304,6 +304,7 @@ mount_connect_service(
 
 
 @app.get("/health")
+@app.get("/kaithhealth")
 async def health_check() -> Dict[str, Any]:
     """Readiness probe for Leapcell gateway."""
     return {

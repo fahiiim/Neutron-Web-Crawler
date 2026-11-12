@@ -165,9 +165,13 @@ class TestLeapcellConnectMicroservices(unittest.IsolatedAsyncioTestCase):
 
                 with (
                     _LiveUvicornServer(search_svc_mod.app, search_port) as search_url,
-                    _LiveUvicornServer(crawler_svc_mod.app, crawler_port),
+                    _LiveUvicornServer(crawler_svc_mod.app, crawler_port) as crawler_url,
                     _LiveUvicornServer(gateway_svc_mod.app, gw_port) as gw_url,
                 ):
+                    async with httpx.AsyncClient(timeout=5.0) as probe:
+                        for base_u in (search_url, crawler_url, gw_url):
+                            kh = await probe.get(f"{base_u}/kaithhealth")
+                            self.assertEqual(kh.status_code, 200)
                     # 1. Internal auth interceptor must block unauthenticated SearchService calls
                     async with neutron_connect.SearchServiceClient(search_url) as unauth_client:
                         with self.assertRaises(ConnectError) as ctx_err:

@@ -242,6 +242,7 @@ mount_connect_service(app, _rpc_app)
 
 
 @app.get("/health")
+@app.get("/kaithhealth")
 async def health_check() -> Dict[str, Any]:
     """Health endpoint for Leapcell and container readiness checks."""
     return {
