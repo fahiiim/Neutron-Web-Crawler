@@ -61,6 +61,7 @@ class GatewayServiceSettings(ServiceBaseSettings):
     JIT_CACHE_THRESHOLD: int = 5
     SYNTHESIS_MAX_SOURCES: int = 5
     LIVE_JIT_DEADLINE_SECONDS: float = 4.8
+    CACHE_TTL_SECONDS: int = 300
 
     RATE_LIMIT_SEARCH: str = "30/minute"
     RATE_LIMIT_STREAM: str = "15/minute"
@@ -92,6 +93,9 @@ class SearchServiceSettings(ServiceBaseSettings):
     """Configuration for the Index Query & Synthesis microservice."""
 
     SYNTHESIS_MAX_SOURCES: int = 5
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-2.5-flash"
+    GEMINI_TIMEOUT_SECONDS: float = 4.5
 
 
 class CrawlerServiceSettings(ServiceBaseSettings):

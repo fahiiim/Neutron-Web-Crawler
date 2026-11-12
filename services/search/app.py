@@ -55,13 +55,17 @@ class SearchServiceImpl:
 
         raw_hits = await turso_crawler_client.search(clean_query, limit=limit)
         filtered_hits = filter_hits_by_mode(raw_hits, mode)
+        reranked_hits = sort_hits_by_relevance(clean_query, filtered_hits, mode=mode)
         formatted, answer = await attach_synthesis_and_excerpts(
             clean_query,
-            filtered_hits,
+            reranked_hits,
             include_markdown=bool(request.include_markdown),
             max_sources=settings.SYNTHESIS_MAX_SOURCES,
             get_payloads_map=turso_crawler_client.get_payloads_map,
             decompress_fn=decompress_text,
+            gemini_api_key=settings.GEMINI_API_KEY,
+            gemini_model=settings.GEMINI_MODEL,
+            gemini_timeout_seconds=settings.GEMINI_TIMEOUT_SECONDS,
         )
         duration_ms = round((time.perf_counter() - t0) * 1000)
 
@@ -97,6 +101,9 @@ class SearchServiceImpl:
             max_sources=max_sources,
             get_payloads_map=turso_crawler_client.get_payloads_map,
             decompress_fn=decompress_text,
+            gemini_api_key=settings.GEMINI_API_KEY,
+            gemini_model=settings.GEMINI_MODEL,
+            gemini_timeout_seconds=settings.GEMINI_TIMEOUT_SECONDS,
         )
         proto_answer, has_answer = answer_to_proto(answer)
         return neutron_pb.SynthesizeAnswerResponse(

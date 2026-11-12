@@ -13,6 +13,7 @@ message Citation {
 message GroundedAnswer {
   string summary = 1;
   repeated Citation citations = 2;
+  string mode = 3;
 }
 
 message SearchDocument {
@@ -159,10 +160,29 @@ message CrawlUrlRequest {
   bool fast_live = 3;
   bool include_full_text = 4;
   bool check_robots = 5;
+  bool force_refresh = 6;
 }
 
 message CrawlUrlResponse {
   CrawlOutcome outcome = 1;
+}
+
+message StreamCrawlRequest {
+  string query = 1;
+  int32 max_pages = 2;
+  string mode = 3;
+  repeated string skip_urls = 4;
+  bool include_full_text = 5;
+  bool force_refresh = 6;
+}
+
+message CrawlStreamEvent {
+  string event_type = 1;
+  DiscoveryMetric metric = 2;
+  CrawlOutcome outcome = 3;
+  string url = 4;
+  string domain = 5;
+  string message = 6;
 }
 
 message GatewaySearchRequest {
@@ -170,6 +190,7 @@ message GatewaySearchRequest {
   int32 limit = 2;
   string mode = 3;
   bool include_markdown = 4;
+  bool refresh = 5;
 }
 
 message GatewaySearchResponse {
@@ -196,6 +217,7 @@ service CrawlerService {
   rpc DiscoverAndCrawl(DiscoverAndCrawlRequest) returns (DiscoverAndCrawlResponse);
   rpc DiscoverSeeds(DiscoverSeedsRequest) returns (DiscoverSeedsResponse);
   rpc CrawlUrl(CrawlUrlRequest) returns (CrawlUrlResponse);
+  rpc StreamCrawl(StreamCrawlRequest) returns (stream CrawlStreamEvent);
 }
 
 service GatewayService {

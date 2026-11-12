@@ -19,10 +19,10 @@ from connectrpc.server import ConnectASGIApplication, ConnectWSGIApplication, DE
 from protobuf import DescService
 
 from . import neutron_pb
-from .neutron_pb import CrawlUrlRequest, CrawlUrlResponse, DiscoverAndCrawlRequest, DiscoverAndCrawlResponse, DiscoverSeedsRequest, DiscoverSeedsResponse, GatewaySearchRequest, GatewaySearchResponse, GetDocumentRequest, GetDocumentResponse, GetStatsRequest, GetStatsResponse, GetTrendingRequest, GetTrendingResponse, QueryIndexRequest, QueryIndexResponse, RecordHotTopicRequest, RecordHotTopicResponse, SuggestRequest, SuggestResponse, SynthesizeAnswerRequest, SynthesizeAnswerResponse
+from .neutron_pb import CrawlStreamEvent, CrawlUrlRequest, CrawlUrlResponse, DiscoverAndCrawlRequest, DiscoverAndCrawlResponse, DiscoverSeedsRequest, DiscoverSeedsResponse, GatewaySearchRequest, GatewaySearchResponse, GetDocumentRequest, GetDocumentResponse, GetStatsRequest, GetStatsResponse, GetTrendingRequest, GetTrendingResponse, QueryIndexRequest, QueryIndexResponse, RecordHotTopicRequest, RecordHotTopicResponse, StreamCrawlRequest, SuggestRequest, SuggestResponse, SynthesizeAnswerRequest, SynthesizeAnswerResponse
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Iterable, Mapping
+    from collections.abc import AsyncGenerator, AsyncIterator, Iterable, Iterator, Mapping
 
     from connectrpc.codec import Codec
     from connectrpc.compression import Compression
@@ -581,6 +581,9 @@ class CrawlerService(Protocol):
     async def crawl_url(self, request: CrawlUrlRequest, ctx: RequestContext[CrawlUrlRequest, CrawlUrlResponse], /) -> CrawlUrlResponse:
         raise ConnectError(Code.UNIMPLEMENTED, 'Not implemented')
 
+    def stream_crawl(self, request: StreamCrawlRequest, ctx: RequestContext[StreamCrawlRequest, CrawlStreamEvent], /) -> AsyncIterator[CrawlStreamEvent]:
+        raise ConnectError(Code.UNIMPLEMENTED, 'Not implemented')
+
     @classmethod
     def desc(cls) -> DescService:
         """Returns the descriptor for this service."""
@@ -631,6 +634,17 @@ class CrawlerServiceASGIApplication(ConnectASGIApplication[CrawlerService]):
                         stream_type=StreamType.UNARY,
                     ),
                     function=svc.crawl_url,
+                ),
+                "/neutron.v1.CrawlerService/StreamCrawl": Endpoint.server_stream(
+                    method=MethodInfo(
+                        name="StreamCrawl",
+                        service_name="neutron.v1.CrawlerService",
+                        input=StreamCrawlRequest,
+                        output=CrawlStreamEvent,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                        stream_type=StreamType.SERVER_STREAM,
+                    ),
+                    function=svc.stream_crawl,
                 ),
             },
             interceptors=interceptors,
@@ -706,6 +720,26 @@ class CrawlerServiceClient(ConnectClient):
             headers=headers,
             timeout_ms=timeout_ms,
         )
+    def stream_crawl(
+        self,
+        request: StreamCrawlRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None, 
+        timeout_ms: int | None = None,
+    ) -> AsyncIterator[CrawlStreamEvent]:
+        return self.execute_server_stream(
+            request=request,
+            method=MethodInfo(
+                name="StreamCrawl",
+                service_name="neutron.v1.CrawlerService",
+                input=StreamCrawlRequest,
+                output=CrawlStreamEvent,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+                stream_type=StreamType.SERVER_STREAM,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
 
 class CrawlerServiceSync(Protocol):
     def discover_and_crawl(self, request: DiscoverAndCrawlRequest, ctx: RequestContext[DiscoverAndCrawlRequest, DiscoverAndCrawlResponse], /) -> DiscoverAndCrawlResponse:
@@ -715,6 +749,9 @@ class CrawlerServiceSync(Protocol):
         raise ConnectError(Code.UNIMPLEMENTED, 'Not implemented')
 
     def crawl_url(self, request: CrawlUrlRequest, ctx: RequestContext[CrawlUrlRequest, CrawlUrlResponse], /) -> CrawlUrlResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, 'Not implemented')
+
+    def stream_crawl(self, request: StreamCrawlRequest, ctx: RequestContext[StreamCrawlRequest, CrawlStreamEvent], /) -> Iterator[CrawlStreamEvent]:
         raise ConnectError(Code.UNIMPLEMENTED, 'Not implemented')
 
     @classmethod
@@ -765,6 +802,17 @@ class CrawlerServiceWSGIApplication(ConnectWSGIApplication):
                         stream_type=StreamType.UNARY,
                     ),
                     function=service.crawl_url,
+                ),
+                "/neutron.v1.CrawlerService/StreamCrawl": EndpointSync.server_stream(
+                    method=MethodInfo(
+                        name="StreamCrawl",
+                        service_name="neutron.v1.CrawlerService",
+                        input=StreamCrawlRequest,
+                        output=CrawlStreamEvent,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                        stream_type=StreamType.SERVER_STREAM,
+                    ),
+                    function=service.stream_crawl,
                 ),
             },
             interceptors=interceptors,
@@ -836,6 +884,26 @@ class CrawlerServiceClientSync(ConnectClientSync):
                 output=CrawlUrlResponse,
                 idempotency_level=IdempotencyLevel.UNKNOWN,
                 stream_type=StreamType.UNARY,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+    def stream_crawl(
+        self,
+        request: StreamCrawlRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None, 
+        timeout_ms: int | None = None,
+    ) -> Iterator[CrawlStreamEvent]:
+        return self.execute_server_stream(
+            request=request,
+            method=MethodInfo(
+                name="StreamCrawl",
+                service_name="neutron.v1.CrawlerService",
+                input=StreamCrawlRequest,
+                output=CrawlStreamEvent,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+                stream_type=StreamType.SERVER_STREAM,
             ),
             headers=headers,
             timeout_ms=timeout_ms,

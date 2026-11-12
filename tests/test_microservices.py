@@ -290,6 +290,140 @@ class TestLeapcellConnectMicroservices(unittest.IsolatedAsyncioTestCase):
             gateway_svc_mod.settings.SEARCH_SERVICE_URL = orig_search_url
             gateway_svc_mod.settings.CRAWLER_SERVICE_URL = orig_crawler_url
 
+    async def test_stream_crawl_ttl_cache_refresh_and_request_tracing(self):
+        secret = "test-stream-trace-secret"
+        orig_search_key = search_svc_mod.settings.INTERNAL_API_KEY
+        orig_crawler_key = crawler_svc_mod.settings.INTERNAL_API_KEY
+        orig_gw_key = gateway_svc_mod.settings.INTERNAL_API_KEY
+        orig_gw_search_url = gateway_svc_mod.settings.SEARCH_SERVICE_URL
+        orig_gw_crawler_url = gateway_svc_mod.settings.CRAWLER_SERVICE_URL
+        orig_gw_threshold = gateway_svc_mod.settings.JIT_CACHE_THRESHOLD
+
+        fake_db = AsyncMock()
+        fake_db.is_configured = lambda: False
+        fake_db.search = AsyncMock(
+            return_value=[
+                {
+                    "url_hash": str(100 + i),
+                    "url": f"https://docs.example.org/join-{i}",
+                    "title": f"SQL JOIN Part {i}",
+                    "snippet": "Joins combine rows from related tables using common columns.",
+                    "score": 5.0 - i,
+                    "crawled_at": "2026-11-12 00:00:00",
+                }
+                for i in range(5)
+            ]
+        )
+        fake_db.get_payloads_map = AsyncMock(return_value={})
+        fake_db.record_hot_topic = AsyncMock(return_value=None)
+
+        search_svc_mod._auth_interceptor._expected_key = secret
+        crawler_svc_mod._auth_interceptor._expected_key = secret
+        gateway_svc_mod.settings.INTERNAL_API_KEY = secret
+        gateway_svc_mod.settings.JIT_CACHE_THRESHOLD = 5
+
+        search_port = _free_port()
+        crawler_port = _free_port()
+        gw_port = _free_port()
+
+        try:
+            with (
+                patch.object(search_svc_mod, "turso_crawler_client", fake_db),
+                patch.object(crawler_svc_mod, "turso_crawler_client", fake_db),
+                patch.object(
+                    crawler_svc_mod,
+                    "discover_seed_urls_detailed",
+                    AsyncMock(
+                        return_value=(
+                            ["https://example.org/sql-joins"],
+                            [{"source": "wikipedia", "urls_found": 1, "duration_ms": 10, "status": "ok"}],
+                        )
+                    ),
+                ),
+                patch.object(
+                    crawler_svc_mod.robots_manager,
+                    "is_allowed",
+                    AsyncMock(return_value=True),
+                ),
+                patch.object(
+                    crawler_svc_mod.legacy_crawler,
+                    "fetch_and_index_document",
+                    AsyncMock(
+                        return_value={
+                            "url_hash": "8801",
+                            "url": "https://example.org/sql-joins",
+                            "title": "SQL Join Guide",
+                            "snippet": "JOIN combines rows across relational database tables.",
+                            "score": 2.0,
+                            "crawled_at": "2026-11-12 00:00:00",
+                            "_full_text": "JOIN combines rows across relational database tables cleanly.",
+                        }
+                    ),
+                ),
+            ):
+                with (
+                    _LiveUvicornServer(search_svc_mod.app, search_port) as search_url,
+                    _LiveUvicornServer(crawler_svc_mod.app, crawler_port) as crawler_url,
+                ):
+                    gateway_svc_mod.settings.SEARCH_SERVICE_URL = search_url
+                    gateway_svc_mod.settings.CRAWLER_SERVICE_URL = crawler_url
+
+                    # Verify StreamCrawl server-streaming RPC enforces auth & streams events
+                    async with neutron_connect.CrawlerServiceClient(
+                        crawler_url, protocol=ProtocolType.CONNECT
+                    ) as c_client:
+                        with self.assertRaises(ConnectError) as unauth_ctx:
+                            async for _ in c_client.stream_crawl(
+                                neutron_pb.StreamCrawlRequest(query="sql join", max_pages=3)
+                            ):
+                                pass
+                        self.assertEqual(unauth_ctx.exception.code, Code.UNAUTHENTICATED)
+
+                        streamed_types = []
+                        async for evt in c_client.stream_crawl(
+                            neutron_pb.StreamCrawlRequest(query="sql join", max_pages=3),
+                            headers={"Authorization": f"Bearer {secret}"},
+                        ):
+                            streamed_types.append(evt.event_type)
+                        self.assertIn("discovery_result", streamed_types)
+                        self.assertIn("crawl_success", streamed_types)
+
+                    with _LiveUvicornServer(gateway_svc_mod.app, gw_port) as gw_url:
+                        async with httpx.AsyncClient(timeout=10.0) as http:
+                            r1 = await http.get(
+                                f"{gw_url}/search",
+                                params={"q": "sql join"},
+                                headers={"x-request-id": "trace-abc-123"},
+                            )
+                            self.assertEqual(r1.status_code, 200)
+                            self.assertEqual(r1.headers.get("x-request-id"), "trace-abc-123")
+                            d1 = r1.json()
+                            self.assertFalse(d1["cache_hit"])
+                            self.assertIn("timings", d1)
+                            calls_after_r1 = fake_db.search.await_count
+
+                            # Repeat call hits Gateway TTLCache without calling SearchService
+                            r2 = await http.get(f"{gw_url}/search", params={"q": "sql join"})
+                            self.assertEqual(r2.status_code, 200)
+                            self.assertTrue(r2.json()["cache_hit"])
+                            self.assertEqual(fake_db.search.await_count, calls_after_r1)
+
+                            # refresh=true bypasses Gateway TTLCache
+                            r3 = await http.get(
+                                f"{gw_url}/search",
+                                params={"q": "sql join", "refresh": "true"},
+                            )
+                            self.assertEqual(r3.status_code, 200)
+                            self.assertFalse(r3.json()["cache_hit"])
+                            self.assertGreater(fake_db.search.await_count, calls_after_r1)
+        finally:
+            search_svc_mod._auth_interceptor._expected_key = orig_search_key
+            crawler_svc_mod._auth_interceptor._expected_key = orig_crawler_key
+            gateway_svc_mod.settings.INTERNAL_API_KEY = orig_gw_key
+            gateway_svc_mod.settings.SEARCH_SERVICE_URL = orig_gw_search_url
+            gateway_svc_mod.settings.CRAWLER_SERVICE_URL = orig_gw_crawler_url
+            gateway_svc_mod.settings.JIT_CACHE_THRESHOLD = orig_gw_threshold
+
 
 if __name__ == "__main__":
     unittest.main()

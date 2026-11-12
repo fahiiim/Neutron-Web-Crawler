@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { Header } from "./components/Header";
 import { SearchBar } from "./components/SearchBar";
 import { AnswerCard } from "./components/AnswerCard";
@@ -33,6 +34,44 @@ const EXAMPLE_QUERIES = [
 ];
 
 const RECENT_KEY = "neutron_recent_queries_v1";
+const SESSION_CACHE_PREFIX = "neutron_scache_v1:";
+const SESSION_CACHE_TTL_MS = 5 * 60 * 1000;
+
+interface CachedSearchEntry {
+  ts: number;
+  results: SearchResult[];
+  answer: GroundedAnswer | null;
+}
+
+function loadCachedSearch(q: string, m: SearchMode): CachedSearchEntry | null {
+  try {
+    const raw = sessionStorage.getItem(`${SESSION_CACHE_PREFIX}${m}:${q.toLowerCase()}`);
+    if (!raw) return null;
+    const parsed: CachedSearchEntry = JSON.parse(raw);
+    if (!parsed || Date.now() - parsed.ts > SESSION_CACHE_TTL_MS) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveCachedSearch(
+  q: string,
+  m: SearchMode,
+  results: SearchResult[],
+  answer: GroundedAnswer | null,
+): void {
+  if (!results.length) return;
+  try {
+    const entry: CachedSearchEntry = { ts: Date.now(), results, answer };
+    sessionStorage.setItem(
+      `${SESSION_CACHE_PREFIX}${m}:${q.toLowerCase()}`,
+      JSON.stringify(entry),
+    );
+  } catch {
+    // Ignore storage quota errors
+  }
+}
 
 function loadRecent(): string[] {
   try {
@@ -63,6 +102,7 @@ export function App() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const [recentQueries, setRecentQueries] = useState<string[]>(loadRecent);
+  const [trendingQueries, setTrendingQueries] = useState<string[]>(EXAMPLE_QUERIES);
   const [selectedIdx, setSelectedIdx] = useState(-1);
   const [readerTarget, setReaderTarget] = useState<ReaderTarget | null>(null);
   const [statsOpen, setStatsOpen] = useState(false);
@@ -103,9 +143,28 @@ export function App() {
     }
   }, []);
 
+  const fetchTrending = useCallback(async () => {
+    try {
+      const res = await fetch(apiUrl("/trending"));
+      if (!res.ok) return;
+      const data = await res.json();
+      const rows = Array.isArray(data?.trending) ? data.trending : [];
+      const topics = rows
+        .map((r: { topic?: string; term?: string }) => (r.topic || r.term || "").trim())
+        .filter(Boolean)
+        .slice(0, 6);
+      if (topics.length > 0) {
+        setTrendingQueries(topics);
+      }
+    } catch {
+      // Keep fallback example chips silently
+    }
+  }, []);
+
   useEffect(() => {
     fetchStats();
-  }, [fetchStats]);
+    fetchTrending();
+  }, [fetchStats, fetchTrending]);
 
   useEffect(() => {
     if (!loading || results.length > 0) {
@@ -124,20 +183,30 @@ export function App() {
   }, []);
 
   const fallbackJsonSearch = useCallback(
-    async (cleanQuery: string, searchMode: SearchMode, t0: number) => {
+    async (
+      cleanQuery: string,
+      searchMode: SearchMode,
+      t0: number,
+      refresh = false,
+    ) => {
       try {
         const res = await fetch(
           apiUrl(
-            `/search?q=${encodeURIComponent(cleanQuery)}&mode=${encodeURIComponent(searchMode)}`,
+            `/search?q=${encodeURIComponent(cleanQuery)}&mode=${encodeURIComponent(searchMode)}${
+              refresh ? "&refresh=true" : ""
+            }`,
           ),
         );
         const data = await res.json().catch(() => null);
         if (!res.ok) {
           throw new Error(data?.detail || `Search failed (${res.status})`);
         }
-        setResults(Array.isArray(data?.results) ? data.results : []);
-        setAnswer(data?.answer || null);
+        const nextResults: SearchResult[] = Array.isArray(data?.results) ? data.results : [];
+        const nextAnswer: GroundedAnswer | null = data?.answer || null;
+        setResults(nextResults);
+        setAnswer(nextAnswer);
         setElapsedMs(Math.round(performance.now() - t0));
+        saveCachedSearch(cleanQuery, searchMode, nextResults, nextAnswer);
       } catch (err) {
         setErrorMsg(
           err instanceof Error ? err.message : "Search request failed",
@@ -151,7 +220,12 @@ export function App() {
   );
 
   const runSearch = useCallback(
-    (rawQuery: string, targetMode: SearchMode = mode, pushUrl = true) => {
+    (
+      rawQuery: string,
+      targetMode: SearchMode = mode,
+      pushUrl = true,
+      refresh = false,
+    ) => {
       const cleanQuery = rawQuery.trim();
       if (!cleanQuery) return;
 
@@ -162,14 +236,10 @@ export function App() {
       setActiveQuery(cleanQuery);
       setMode(targetMode);
       setSearched(true);
-      setLoading(true);
       setCrawling(false);
       setStatusText("");
       setCrawlItems([]);
-      setResults([]);
-      setAnswer(null);
       setErrorMsg(null);
-      setElapsedMs(null);
       setSelectedIdx(-1);
 
       saveRecent(cleanQuery);
@@ -181,17 +251,38 @@ export function App() {
         window.history.pushState(null, "", `?${params.toString()}`);
       }
 
+      if (!refresh) {
+        const cached = loadCachedSearch(cleanQuery, targetMode);
+        if (cached) {
+          setResults(cached.results);
+          setAnswer(cached.answer);
+          setElapsedMs(Math.max(1, Math.round(performance.now() - t0)));
+          setLoading(false);
+          return;
+        }
+      }
+
+      setLoading(true);
+      setResults([]);
+      setAnswer(null);
+      setElapsedMs(null);
+
       const streamUrl = apiUrl(
-        `/search/stream?q=${encodeURIComponent(cleanQuery)}&mode=${encodeURIComponent(targetMode)}`,
+        `/search/stream?q=${encodeURIComponent(cleanQuery)}&mode=${encodeURIComponent(targetMode)}${
+          refresh ? "&refresh=true" : ""
+        }`,
       );
       const es = new EventSource(streamUrl);
       eventSourceRef.current = es;
       let finished = false;
+      let latestResults: SearchResult[] = [];
+      let latestAnswer: GroundedAnswer | null = null;
 
       es.addEventListener("cached_results", (ev: MessageEvent) => {
         try {
           const payload = JSON.parse(ev.data);
           if (Array.isArray(payload?.results)) {
+            latestResults = payload.results;
             setResults(payload.results);
           }
           if (typeof payload?.duration_ms === "number") {
@@ -290,6 +381,9 @@ export function App() {
       es.addEventListener("live_result", (ev: MessageEvent) => {
         try {
           const doc: SearchResult = JSON.parse(ev.data);
+          if (!latestResults.some((r) => r.url === doc.url)) {
+            latestResults = [...latestResults, doc];
+          }
           setResults((prev) => {
             if (prev.some((r) => r.url === doc.url)) return prev;
             return [...prev, doc];
@@ -302,6 +396,7 @@ export function App() {
       es.addEventListener("answer", (ev: MessageEvent) => {
         try {
           const parsed: GroundedAnswer = JSON.parse(ev.data);
+          latestAnswer = parsed;
           setAnswer(parsed);
         } catch {
           // Ignore
@@ -313,6 +408,7 @@ export function App() {
         setLoading(false);
         setCrawling(false);
         setElapsedMs(Math.round(performance.now() - t0));
+        saveCachedSearch(cleanQuery, targetMode, latestResults, latestAnswer);
         es.close();
         eventSourceRef.current = null;
         fetchStats();
@@ -322,7 +418,7 @@ export function App() {
         es.close();
         eventSourceRef.current = null;
         if (!finished) {
-          fallbackJsonSearch(cleanQuery, targetMode, t0);
+          fallbackJsonSearch(cleanQuery, targetMode, t0, refresh);
         }
       };
     },
@@ -456,7 +552,7 @@ export function App() {
             </div>
 
             <div className="mt-7 flex flex-wrap items-center justify-center gap-2">
-              {EXAMPLE_QUERIES.map((example) => (
+              {trendingQueries.map((example) => (
                 <button
                   key={example}
                   type="button"
@@ -514,6 +610,17 @@ export function App() {
                       elapsedMs !== null ? ` · ${(elapsedMs / 1000).toFixed(2)}s` : ""
                     }`}
               </span>
+              {activeQuery && !loading && (
+                <button
+                  type="button"
+                  onClick={() => runSearch(activeQuery, mode, false, true)}
+                  className="inline-flex items-center gap-1.5 text-neutral-500 hover:text-white transition-colors cursor-pointer"
+                  title="Re-crawl live sources and refresh summary"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>Refresh</span>
+                </button>
+              )}
             </div>
 
             <CrawlProgressDrawer

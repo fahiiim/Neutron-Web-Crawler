@@ -288,21 +288,132 @@ def filter_hits_by_mode(hits: List[Dict[str, Any]], mode: str) -> List[Dict[str,
     return filtered
 
 
-def sort_hits_by_relevance(clean_query: str, hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Sort search hits descending by query-relevance signal then OPIC/BM25 score."""
-    return sorted(
-        hits,
-        key=lambda h: (
-            score_document_relevance(
-                clean_query,
-                h.get("title", ""),
-                h.get("snippet", ""),
-                h.get("url", ""),
-            )[0],
-            float(h.get("score") or 0.0),
-        ),
-        reverse=True,
+_GEMINI_ENDPOINT_TMPL = (
+    "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+)
+
+
+def _clean_gemini_summary(raw_text: str) -> str:
+    """Strip markdown styling or conversational preambles from Gemini output."""
+    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", (raw_text or "").strip())
+    text = re.sub(r"^#+\s*", "", text, flags=re.MULTILINE)
+    text = re.sub(
+        r"^(?:here(?:'s| is)\s+(?:a|the)\s+summary[:\-\s]*|summary[:\-\s]*)",
+        "",
+        text,
+        flags=re.IGNORECASE,
     )
+    return re.sub(r"\s+", " ", text).strip()
+
+
+async def synthesize_with_gemini(
+    query: str,
+    synthesis_inputs: List[Dict[str, Any]],
+    *,
+    api_key: str,
+    model: str = "gemini-2.5-flash",
+    timeout_seconds: float = 4.5,
+) -> Optional[Dict[str, Any]]:
+    """Generate a concise cited summary grounded strictly in retrieved sources via Gemini REST."""
+    clean_key = (api_key or "").strip()
+    if not clean_key or not query.strip() or not synthesis_inputs:
+        return None
+
+    source_rows: List[Dict[str, Any]] = []
+    context_blocks: List[str] = []
+    for doc in synthesis_inputs[:5]:
+        url = str(doc.get("url") or "").strip()
+        title = str(doc.get("title") or "").strip()
+        body = str(
+            doc.get("full_text")
+            or doc.get("_full_text")
+            or doc.get("raw_snippet")
+            or doc.get("snippet")
+            or ""
+        ).strip()
+        excerpt = _sanitize_prose(body)[:1200]
+        if not url or not excerpt:
+            continue
+        source_rows.append(doc)
+        context_blocks.append(f"[{len(source_rows)}] {title} ({url})\n{excerpt}")
+
+    if not context_blocks:
+        return None
+
+    prompt = (
+        "Answer the user query concisely in 2 to 4 plain factual sentences using ONLY the sources below.\n"
+        "Cite supporting facts inline with [1], [2], etc. matching the numbered sources.\n"
+        "Do not invent facts, do not use bullet points or markdown, and do not add intro phrases.\n\n"
+        f"Query: {query.strip()}\n\n"
+        "Sources:\n" + "\n\n".join(context_blocks)
+    )
+    endpoint = _GEMINI_ENDPOINT_TMPL.format(model=(model or "gemini-2.5-flash").strip())
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.15, "maxOutputTokens": 260},
+    }
+
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+            resp = await client.post(
+                endpoint,
+                headers={"x-goog-api-key": clean_key, "Content-Type": "application/json"},
+                json=payload,
+            )
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+    except Exception:
+        return None
+
+    candidates = data.get("candidates") if isinstance(data, dict) else None
+    if not candidates or not isinstance(candidates, list):
+        return None
+    parts = ((candidates[0] or {}).get("content") or {}).get("parts") or []
+    raw_answer = " ".join(str(p.get("text") or "") for p in parts if isinstance(p, dict))
+    summary = _clean_gemini_summary(raw_answer)
+    if len(summary) < 25:
+        return None
+
+    all_citations = [
+        {
+            "index": idx,
+            "url": str(doc.get("url") or ""),
+            "url_hash": str(doc.get("url_hash") or ""),
+            "title": str(doc.get("title") or extract_domain_host(str(doc.get("url") or ""))),
+            "domain": extract_domain_host(str(doc.get("url") or "")),
+        }
+        for idx, doc in enumerate(source_rows, start=1)
+        if doc.get("url")
+    ]
+    referenced = {int(m) for m in re.findall(r"\[(\d+)\]", summary)}
+    citations = [c for c in all_citations if c["index"] in referenced] or all_citations[:3]
+
+    return {
+        "summary": summary,
+        "citations": citations,
+        "mode": "gemini_grounded",
+    }
+
+
+def sort_hits_by_relevance(
+    clean_query: str, hits: List[Dict[str, Any]], *, mode: str = "all"
+) -> List[Dict[str, Any]]:
+    """Sort search hits descending by matched term count, relevance boost, then OPIC/BM25 score."""
+
+    def _rank_key(h: Dict[str, Any]) -> Tuple[int, float, float]:
+        matched, rel_score = score_document_relevance(
+            clean_query,
+            h.get("title", ""),
+            h.get("snippet", ""),
+            h.get("url", ""),
+            mode=mode,
+        )
+        return (matched, rel_score, float(h.get("score") or 0.0))
+
+    return sorted(hits, key=_rank_key, reverse=True)
 
 
 async def attach_synthesis_and_excerpts(
@@ -313,6 +424,9 @@ async def attach_synthesis_and_excerpts(
     max_sources: int = 5,
     get_payloads_map: Optional[Callable[[List[int]], Awaitable[Dict[int, bytes]]]] = None,
     decompress_fn: Optional[Callable[[bytes], Optional[str]]] = None,
+    gemini_api_key: str = "",
+    gemini_model: str = "gemini-2.5-flash",
+    gemini_timeout_seconds: float = 4.5,
 ) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Hydrate top docs from payload storage if needed, synthesize answer, and format snippets."""
     top_docs = docs[:max_sources]
@@ -350,7 +464,17 @@ async def attach_synthesis_and_excerpts(
             }
         )
 
-    answer = synthesize_grounded_answer(query, synthesis_inputs, max_sentences=4)
+    answer = None
+    if (gemini_api_key or "").strip():
+        answer = await synthesize_with_gemini(
+            query,
+            synthesis_inputs,
+            api_key=gemini_api_key,
+            model=gemini_model,
+            timeout_seconds=gemini_timeout_seconds,
+        )
+    if answer is None:
+        answer = synthesize_grounded_answer(query, synthesis_inputs, max_sentences=4)
 
     formatted_docs: List[Dict[str, Any]] = []
     payload_lookup = {s["url"]: s["full_text"] for s in synthesis_inputs}

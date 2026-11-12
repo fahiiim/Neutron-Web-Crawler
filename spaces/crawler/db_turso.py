@@ -42,7 +42,7 @@ _SYNONYM_GROUPS = {
 }
 
 _QUESTION_PREFIX_RE = re.compile(
-    r"^(what\s+(?:is|are|was|were|does|do|to\s+do\s+to(?:\s+make\s+me)?)\s+(?:the\s+)?(?:name\s+of\s+)?|"
+    r"^(what\s+(?:is|are|was|were|does|do|to\s+do\s+to(?:\s+make\s+me)?)\s+(?:the\s+)?(?:(?:name|(?:\w+\s+)?purpose|reason|role|benefit|benefits|meaning|definition|overview|concept)\s+of\s+(?:the\s+)?)?|"
     r"who\s+(?:is|are|was|were|invented|wrote|created)\s+(?:the\s+)?|"
     r"how\s+(?:does|do|did|can|to)\s+|"
     r"why\s+(?:does|do|did|is|are)\s+|"
@@ -72,6 +72,71 @@ def normalize_search_query(query: str) -> str:
     return cleaned if cleaned else raw.rstrip("?!.").strip()
 
 
+_FILLER_QUERY_WORDS = frozenset(
+    {
+        "purpose",
+        "main",
+        "primary",
+        "reason",
+        "role",
+        "benefit",
+        "benefits",
+        "definition",
+        "overview",
+        "meaning",
+        "important",
+        "importance",
+        "concept",
+    }
+)
+
+_AUTHORITATIVE_DOMAINS = (
+    "wikipedia.org",
+    "developer.mozilla.org",
+    "docs.python.org",
+    "postgresql.org",
+    "dev.mysql.com",
+    "sqlite.org",
+    "learn.microsoft.com",
+    "w3schools.com",
+    "geeksforgeeks.org",
+    "sqltutorial.org",
+    "react.dev",
+)
+
+_BOILERPLATE_PHRASES = (
+    "main purpose of this project",
+    "course-enrollment",
+    "starter template",
+    "fork me on github",
+)
+
+
+def _expand_term_variants(term: str) -> Tuple[str, ...]:
+    """Produce conservative morphological variants (e.g. joining -> join) for FTS/scoring."""
+    variants: List[str] = [term]
+    if len(term) >= 6 and term.endswith("ing"):
+        stem = term[:-3]
+        if len(stem) >= 4 and stem[-1] == stem[-2]:
+            variants.append(stem[:-1])
+        variants.extend((stem, f"{stem}s", f"{stem}ed"))
+    elif len(term) >= 5 and term.endswith("ies"):
+        variants.append(term[:-3] + "y")
+    elif len(term) >= 5 and term.endswith("ed"):
+        stem = term[:-2]
+        variants.extend((stem, f"{stem}s", f"{stem}ing"))
+    elif len(term) >= 4 and term.endswith("s") and not term.endswith(("ss", "us", "is")):
+        variants.append(term[:-1])
+
+    seen = set()
+    deduped: List[str] = []
+    for item in variants:
+        if len(item) >= 2 and item not in seen:
+            seen.add(item)
+            deduped.append(item)
+    return tuple(deduped)
+
+
 def sanitize_fts_terms(query: str) -> List[str]:
     """Normalize conversational prefixes, extract safe tokens, and strip FTS5 syntax."""
     source_text = normalize_search_query(query)
@@ -91,6 +156,10 @@ def sanitize_fts_terms(query: str) -> List[str]:
     if not terms:
         terms = base_tokens
 
+    non_filler = [t for t in terms if t not in _FILLER_QUERY_WORDS]
+    if non_filler:
+        terms = non_filler
+
     # Deduplicate preserving order and cap at 8 terms
     seen = set()
     unique_terms: List[str] = []
@@ -104,20 +173,26 @@ def sanitize_fts_terms(query: str) -> List[str]:
 
 
 def _format_fts_term(term: str) -> str:
-    """Format an exact Porter-stemmed FTS5 token (expanding safe aliases)."""
-    return _SYNONYM_GROUPS.get(term, f'"{term}"')
+    """Format an exact Porter-stemmed FTS5 token (expanding safe aliases and inflections)."""
+    if term in _SYNONYM_GROUPS:
+        return _SYNONYM_GROUPS[term]
+    variants = _expand_term_variants(term)
+    if len(variants) == 1:
+        return f'"{variants[0]}"'
+    return "(" + " OR ".join(f'"{v}"' for v in variants) + ")"
 
 
 def _term_matches_text(term: str, low_text: str) -> bool:
-    """Check whether a query term (or >=4-char typo stem prefix / us<->usa) matches text."""
+    """Check whether a query term (or inflected/prefix stem / us<->usa) matches text."""
     if not low_text:
         return False
     if term == "us":
         return bool(re.search(r"\b(?:us|u\.s\.?|usa|united states)\b", low_text))
     if term == "usa":
         return bool(re.search(r"\b(?:usa|us|u\.s\.?|united states)\b", low_text))
-    if re.search(rf"\b{re.escape(term)}\w*", low_text):
-        return True
+    for variant in _expand_term_variants(term):
+        if re.search(rf"\b{re.escape(variant)}\w*", low_text):
+            return True
     if len(term) >= 4:
         stem = term[: max(4, min(len(term) - 1, 5))]
         return bool(re.search(rf"\b{re.escape(stem)}\w*", low_text))
@@ -130,6 +205,8 @@ def score_document_relevance(
     snippet: str,
     url: str,
     body_text: str = "",
+    *,
+    mode: str = "all",
 ) -> Tuple[int, float]:
     """Compute matched query concept count and relevance boost across document fields."""
     terms = sanitize_fts_terms(query)
@@ -158,6 +235,16 @@ def score_document_relevance(
             score += 1.5
         elif in_body:
             score += 0.8
+
+    clean_mode = (mode or "all").strip().lower()
+    if clean_mode != "code":
+        combined_preview = f"{low_title} {low_snippet} {low_url}"
+        if any(phrase in combined_preview for phrase in _BOILERPLATE_PHRASES):
+            score -= 4.0
+    if matched_terms > 0 and clean_mode in ("all", "encyclopedia"):
+        raw_host = (url or "").lower()
+        if any(domain in raw_host for domain in _AUTHORITATIVE_DOMAINS):
+            score += 1.5
 
     return matched_terms, round(score, 3)
 

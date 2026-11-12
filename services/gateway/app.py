@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 import json
 import time
-from typing import Any, AsyncGenerator, Coroutine, Dict, List, Tuple
-import urllib.parse
+from typing import Any, AsyncGenerator, Coroutine, Dict, List, Optional, Tuple
+import uuid
 
 from connectrpc.code import Code
 from connectrpc.errors import ConnectError
@@ -38,7 +39,41 @@ from services.common.rpc import (
 settings = GatewayServiceSettings()
 logger = structlog.get_logger("neutron.service.gateway")
 _START_TIME = time.time()
-_LAST_CRAWLER_WAKE_TS = 0.0
+_LAST_DOWNSTREAM_WAKE_TS = 0.0
+
+
+class _TTLCache:
+    """Bounded in-memory LRU+TTL response cache for hot queries and stats."""
+
+    def __init__(self, *, maxsize: int = 256, ttl_seconds: float = 300.0) -> None:
+        self._maxsize = max(1, int(maxsize))
+        self._ttl = max(1.0, float(ttl_seconds))
+        self._data: OrderedDict[Any, Tuple[float, Any]] = OrderedDict()
+
+    def get(self, key: Any) -> Optional[Any]:
+        entry = self._data.get(key)
+        if entry is None:
+            return None
+        expires_at, value = entry
+        if time.monotonic() >= expires_at:
+            self._data.pop(key, None)
+            return None
+        self._data.move_to_end(key)
+        return value
+
+    def set(self, key: Any, value: Any, *, ttl_seconds: Optional[float] = None) -> None:
+        ttl = self._ttl if ttl_seconds is None else max(1.0, float(ttl_seconds))
+        self._data[key] = (time.monotonic() + ttl, value)
+        self._data.move_to_end(key)
+        while len(self._data) > self._maxsize:
+            self._data.popitem(last=False)
+
+    def clear(self) -> None:
+        self._data.clear()
+
+
+_search_cache = _TTLCache(maxsize=256, ttl_seconds=float(settings.CACHE_TTL_SECONDS))
+_stats_cache = _TTLCache(maxsize=4, ttl_seconds=30.0)
 
 
 def _ephemeral_key(request: Request) -> str:
@@ -51,10 +86,13 @@ limiter = Limiter(key_func=_ephemeral_key)
 
 class _PrivacyHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Any) -> Any:
+        req_id = (request.headers.get("x-request-id") or "").strip()[:64] or uuid.uuid4().hex[:12]
+        request.state.request_id = req_id
         response = await call_next(request)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
         response.headers.setdefault("Permissions-Policy", "interest-cohort=()")
+        response.headers["X-Request-Id"] = req_id
         return response
 
 
@@ -73,8 +111,8 @@ def _fire_and_log(coro: Coroutine[Any, Any, Any], task_name: str) -> asyncio.Tas
     return task
 
 
-def _rpc_headers() -> Dict[str, str]:
-    return internal_auth_headers(settings.INTERNAL_API_KEY)
+def _rpc_headers(request_id: Optional[str] = None) -> Dict[str, str]:
+    return internal_auth_headers(settings.INTERNAL_API_KEY, request_id=request_id)
 
 
 def _get_search_client() -> neutron_connect.SearchServiceClient:
@@ -119,11 +157,24 @@ async def _execute_gateway_search(
     limit: int = 15,
     mode: str = "all",
     include_markdown: bool = False,
+    refresh: bool = False,
+    request_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Coordinate SearchService + CrawlerService over ConnectRPC/gRPC."""
+    """Coordinate SearchService + CrawlerService over ConnectRPC/gRPC with TTL caching & timings."""
+    cache_key = ("json", clean_query.lower(), mode, limit, include_markdown)
+    if not refresh:
+        cached_payload = _search_cache.get(cache_key)
+        if cached_payload is not None:
+            return {
+                **cached_payload,
+                "cache_hit": True,
+                "request_id": request_id or "",
+            }
+
+    total_t0 = time.perf_counter()
     search_client = _get_search_client()
     crawler_client = _get_crawler_client()
-    headers = _rpc_headers()
+    headers = _rpc_headers(request_id)
 
     _fire_and_log(
         search_client.record_hot_topic(
@@ -137,6 +188,7 @@ async def _execute_gateway_search(
     search_err = ""
     cached_resp = None
     cached_docs: List[Dict[str, Any]] = []
+    index_t0 = time.perf_counter()
     try:
         cached_resp = await search_client.query_index(
             neutron_pb.QueryIndexRequest(
@@ -151,33 +203,43 @@ async def _execute_gateway_search(
     except Exception as exc:
         search_ok = False
         search_err = str(exc)
-        logger.warning("gateway_search_rpc_failed", error=search_err)
+        logger.warning("gateway_search_rpc_failed", request_id=request_id, error=search_err)
+    index_ms = round((time.perf_counter() - index_t0) * 1000)
 
-    if cached_resp is not None and len(cached_docs) >= settings.JIT_CACHE_THRESHOLD:
-        return {
+    if not refresh and cached_resp is not None and len(cached_docs) >= settings.JIT_CACHE_THRESHOLD:
+        total_ms = round((time.perf_counter() - total_t0) * 1000)
+        payload = {
             "query": clean_query,
             "mode": mode,
             "source": "index_cache",
             "total": len(cached_docs),
             "answer": proto_to_answer(cached_resp.answer, has_answer=cached_resp.has_answer),
             "results": cached_docs[:limit],
+            "cache_hit": False,
+            "request_id": request_id or "",
+            "timings": {"index_ms": index_ms, "crawl_ms": 0, "synth_ms": 0, "total_ms": total_ms},
         }
+        if payload["results"]:
+            _search_cache.set(cache_key, payload)
+        return payload
 
     live_proto_docs: List[neutron_pb.SearchDocument] = []
+    crawl_t0 = time.perf_counter()
     try:
         crawl_resp = await crawler_client.discover_and_crawl(
             neutron_pb.DiscoverAndCrawlRequest(
                 query=clean_query,
                 max_pages=8,
                 mode=mode,
-                skip_urls=[d["url"] for d in cached_docs if d.get("url")],
+                skip_urls=[] if refresh else [d["url"] for d in cached_docs if d.get("url")],
                 include_full_text=True,
             ),
             headers=headers,
         )
         live_proto_docs = list(crawl_resp.documents)
     except Exception as exc:
-        logger.warning("gateway_crawler_rpc_failed", error=str(exc))
+        logger.warning("gateway_crawler_rpc_failed", request_id=request_id, error=str(exc))
+    crawl_ms = round((time.perf_counter() - crawl_t0) * 1000)
 
     if not search_ok and not live_proto_docs:
         raise HTTPException(
@@ -186,7 +248,8 @@ async def _execute_gateway_search(
         )
 
     if not live_proto_docs:
-        return {
+        total_ms = round((time.perf_counter() - total_t0) * 1000)
+        payload = {
             "query": clean_query,
             "mode": mode,
             "source": "hybrid_jit",
@@ -197,7 +260,13 @@ async def _execute_gateway_search(
                 else None
             ),
             "results": cached_docs[:limit],
+            "cache_hit": False,
+            "request_id": request_id or "",
+            "timings": {"index_ms": index_ms, "crawl_ms": crawl_ms, "synth_ms": 0, "total_ms": total_ms},
         }
+        if payload["results"]:
+            _search_cache.set(cache_key, payload)
+        return payload
 
     # Merge unique hits preserving cached hits first, then synthesize over the combined pool
     seen_urls = {d.get("url") for d in cached_docs if d.get("url")}
@@ -210,7 +279,9 @@ async def _execute_gateway_search(
             combined_proto.append(ld)
 
     combined_proto = combined_proto[:limit]
+    synth_ms = 0
     if search_ok:
+        synth_t0 = time.perf_counter()
         try:
             synth_resp = await search_client.synthesize_answer(
                 neutron_pb.SynthesizeAnswerRequest(
@@ -221,19 +292,34 @@ async def _execute_gateway_search(
                 ),
                 headers=headers,
             )
+            synth_ms = round((time.perf_counter() - synth_t0) * 1000)
+            total_ms = round((time.perf_counter() - total_t0) * 1000)
             formatted = [proto_to_doc(d, include_full_text=False) for d in synth_resp.results]
-            return {
+            payload = {
                 "query": clean_query,
                 "mode": mode,
                 "source": "hybrid_jit",
                 "total": len(formatted),
                 "answer": proto_to_answer(synth_resp.answer, has_answer=synth_resp.has_answer),
                 "results": formatted,
+                "cache_hit": False,
+                "request_id": request_id or "",
+                "timings": {
+                    "index_ms": index_ms,
+                    "crawl_ms": crawl_ms,
+                    "synth_ms": synth_ms,
+                    "total_ms": total_ms,
+                },
             }
+            if payload["results"]:
+                _search_cache.set(cache_key, payload)
+            return payload
         except Exception as exc:
-            logger.warning("gateway_synth_rpc_failed", error=str(exc))
+            synth_ms = round((time.perf_counter() - synth_t0) * 1000)
+            logger.warning("gateway_synth_rpc_failed", request_id=request_id, error=str(exc))
 
     fallback_docs = [proto_to_doc(d, include_full_text=False) for d in combined_proto]
+    total_ms = round((time.perf_counter() - total_t0) * 1000)
     return {
         "query": clean_query,
         "mode": mode,
@@ -241,6 +327,9 @@ async def _execute_gateway_search(
         "total": len(fallback_docs),
         "answer": None,
         "results": fallback_docs,
+        "cache_hit": False,
+        "request_id": request_id or "",
+        "timings": {"index_ms": index_ms, "crawl_ms": crawl_ms, "synth_ms": synth_ms, "total_ms": total_ms},
     }
 
 
@@ -262,6 +351,8 @@ class GatewayServiceImpl:
             limit=limit,
             mode=(request.mode or "all").strip().lower(),
             include_markdown=bool(request.include_markdown),
+            refresh=bool(request.refresh),
+            request_id=ctx.request_headers.get("x-request-id"),
         )
         ans_proto, has_ans = answer_to_proto(payload.get("answer"))
         return neutron_pb.GatewaySearchResponse(
@@ -321,6 +412,8 @@ def _build_http_transport() -> HTTPTransport:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Initialize reusable async ConnectRPC clients backed by pyqwest HTTPTransport."""
+    _search_cache.clear()
+    _stats_cache.clear()
     async with _build_http_transport() as transport:
         search_client, crawler_client = _build_clients(transport)
         app.state._http_client = PyqwestClient(transport=transport)
@@ -329,14 +422,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         try:
             yield
         finally:
+            _search_cache.clear()
+            _stats_cache.clear()
             await search_client.close()
             await crawler_client.close()
 
 
-async def _wake_crawler_health() -> None:
-    http_client = getattr(app.state, "_http_client", None)
-    base = (settings.CRAWLER_SERVICE_URL or "").strip().rstrip("/")
-    if http_client is None or not base:
+async def _ping_health(http_client: PyqwestClient, base_url: str) -> None:
+    base = (base_url or "").strip().rstrip("/")
+    if not base:
         return
     try:
         await http_client.get(f"{base}/health")
@@ -344,14 +438,25 @@ async def _wake_crawler_health() -> None:
         pass
 
 
-def _maybe_wake_crawler() -> None:
-    """Throttled non-blocking ping so sleeping Render/free crawler services start warming."""
-    global _LAST_CRAWLER_WAKE_TS
-    now = time.monotonic()
-    if now - _LAST_CRAWLER_WAKE_TS < 180.0:
+async def _wake_downstream_health() -> None:
+    http_client = getattr(app.state, "_http_client", None)
+    if http_client is None:
         return
-    _LAST_CRAWLER_WAKE_TS = now
-    _fire_and_log(_wake_crawler_health(), "wake_crawler_health")
+    await asyncio.gather(
+        _ping_health(http_client, settings.SEARCH_SERVICE_URL),
+        _ping_health(http_client, settings.CRAWLER_SERVICE_URL),
+        return_exceptions=True,
+    )
+
+
+def _maybe_wake_downstream() -> None:
+    """Throttled non-blocking ping so sleeping Render search and crawler services warm up."""
+    global _LAST_DOWNSTREAM_WAKE_TS
+    now = time.monotonic()
+    if now - _LAST_DOWNSTREAM_WAKE_TS < 180.0:
+        return
+    _LAST_DOWNSTREAM_WAKE_TS = now
+    _fire_and_log(_wake_downstream_health(), "wake_downstream_health")
 
 
 app = FastAPI(
@@ -390,7 +495,8 @@ mount_connect_service(
 @app.get("/health")
 @app.get("/kaithhealth")
 async def health_check() -> Dict[str, Any]:
-    """Readiness probe for Leapcell gateway."""
+    """Readiness probe that also triggers throttled downstream warm-up."""
+    _maybe_wake_downstream()
     return {
         "status": "ok",
         "service": "neutron-gateway",
@@ -415,15 +521,19 @@ async def privacy_endpoint() -> str:
 
 
 @app.get("/stats")
-async def stats_endpoint() -> Dict[str, Any]:
-    """Return index metrics retrieved via SearchService ConnectRPC."""
-    _maybe_wake_crawler()
+async def stats_endpoint(request: Request) -> Dict[str, Any]:
+    """Return index metrics retrieved via SearchService ConnectRPC (cached 30s when connected)."""
+    _maybe_wake_downstream()
+    cached = _stats_cache.get("stats")
+    if cached is not None:
+        return {**cached, "uptime_seconds": int(time.time() - _START_TIME)}
+    req_id = getattr(request.state, "request_id", None)
     try:
         resp = await _get_search_client().get_stats(
-            neutron_pb.GetStatsRequest(), headers=_rpc_headers()
+            neutron_pb.GetStatsRequest(), headers=_rpc_headers(req_id)
         )
         s = resp.stats
-        return {
+        payload = {
             "pages_indexed": int(s.pages_indexed),
             "domains_covered": int(s.domains_covered),
             "frontier_pending": int(s.frontier_pending),
@@ -431,8 +541,11 @@ async def stats_endpoint() -> Dict[str, Any]:
             "connected": bool(s.connected),
             "uptime_seconds": int(time.time() - _START_TIME),
         }
+        if payload["connected"]:
+            _stats_cache.set("stats", payload, ttl_seconds=30.0)
+        return payload
     except Exception as exc:
-        logger.warning("gateway_stats_rpc_failed", error=str(exc))
+        logger.warning("gateway_stats_rpc_failed", request_id=req_id, error=str(exc))
         return {
             "pages_indexed": 0,
             "domains_covered": 0,
@@ -505,12 +618,19 @@ async def search_endpoint(
     q: str = Query(..., min_length=1, max_length=256),
     limit: int = Query(15, ge=1, le=50),
     mode: str = Query("all"),
+    refresh: bool = Query(False),
 ) -> Dict[str, Any]:
     """Execute unified hybrid search over ConnectRPC microservices."""
     clean_query = q.strip()
     if not clean_query:
         return {"query": q, "total": 0, "answer": None, "results": []}
-    return await _execute_gateway_search(clean_query, limit=limit, mode=mode)
+    return await _execute_gateway_search(
+        clean_query,
+        limit=limit,
+        mode=mode,
+        refresh=refresh,
+        request_id=getattr(request.state, "request_id", None),
+    )
 
 
 @app.get("/api/research")
@@ -521,6 +641,7 @@ async def research_endpoint(
     max_results: int = Query(5, ge=1, le=15),
     include_markdown: bool = Query(True),
     mode: str = Query("all"),
+    refresh: bool = Query(False),
 ) -> Dict[str, Any]:
     """Developer & AI-Agent JSON API backed by SearchService + CrawlerService RPC."""
     clean_query = q.strip()
@@ -531,6 +652,8 @@ async def research_endpoint(
         limit=max_results,
         mode=mode,
         include_markdown=include_markdown,
+        refresh=refresh,
+        request_id=getattr(request.state, "request_id", None),
     )
     return {
         "query": payload["query"],
@@ -539,6 +662,8 @@ async def research_endpoint(
         "answer": payload["answer"],
         "total": payload["total"],
         "sources": payload["results"],
+        "timings": payload.get("timings"),
+        "request_id": payload.get("request_id"),
     }
 
 
@@ -548,12 +673,14 @@ async def search_stream(
     request: Request,
     q: str = Query(..., min_length=1, max_length=256),
     mode: str = Query("all"),
+    refresh: bool = Query(False),
 ) -> Any:
-    """Stream cached index hits, microservice JIT crawl progress, and cited synthesis via SSE."""
+    """Stream cached index hits, microservice StreamCrawl progress, and cited synthesis via SSE."""
     clean_query = q.strip()
+    req_id = getattr(request.state, "request_id", None) or ""
     search_client = _get_search_client()
     crawler_client = _get_crawler_client()
-    headers = _rpc_headers()
+    headers = _rpc_headers(req_id)
 
     _fire_and_log(
         search_client.record_hot_topic(
@@ -563,10 +690,43 @@ async def search_stream(
     )
 
     async def event_generator() -> AsyncGenerator[Dict[str, str], None]:
+        total_t0 = time.perf_counter()
+        stream_cache_key = ("stream", clean_query.lower(), mode)
+        if not refresh:
+            cached_stream = _search_cache.get(stream_cache_key)
+            if cached_stream is not None:
+                yield {
+                    "event": "cached_results",
+                    "data": json.dumps(
+                        {
+                            "count": len(cached_stream["results"]),
+                            "duration_ms": 0,
+                            "results": cached_stream["results"],
+                            "cache_hit": True,
+                        }
+                    ),
+                }
+                if cached_stream.get("answer"):
+                    yield {"event": "answer", "data": json.dumps(cached_stream["answer"])}
+                yield {
+                    "event": "done",
+                    "data": json.dumps(
+                        {
+                            "completed": True,
+                            "cache_hit": True,
+                            "request_id": req_id,
+                            "timings": {"index_ms": 0, "crawl_ms": 0, "synth_ms": 0, "total_ms": 0},
+                        }
+                    ),
+                }
+                return
+
         cached_resp = None
         cached_docs: List[Dict[str, Any]] = []
         collected_proto: List[neutron_pb.SearchDocument] = []
         index_ms = 0
+        crawl_ms = 0
+        synth_ms = 0
 
         try:
             cached_resp = await search_client.query_index(
@@ -579,7 +739,7 @@ async def search_stream(
             collected_proto = list(cached_resp.results)
             index_ms = int(cached_resp.duration_ms)
         except Exception as exc:
-            logger.warning("gateway_stream_search_rpc_failed", error=str(exc))
+            logger.warning("gateway_stream_search_rpc_failed", request_id=req_id, error=str(exc))
 
         yield {
             "event": "cached_results",
@@ -588,11 +748,14 @@ async def search_stream(
                     "count": len(cached_docs),
                     "duration_ms": index_ms,
                     "results": cached_docs,
+                    "cache_hit": False,
                 }
             ),
         }
 
-        if len(cached_docs) < settings.JIT_CACHE_THRESHOLD and not await request.is_disconnected():
+        should_crawl = refresh or len(cached_docs) < settings.JIT_CACHE_THRESHOLD
+        added_live = False
+        if should_crawl and not await request.is_disconnected():
             yield {
                 "event": "discovery_start",
                 "data": json.dumps(
@@ -604,141 +767,103 @@ async def search_stream(
                 "data": json.dumps({"message": "Discovering live web sources..."}),
             }
 
+            crawl_t0 = time.perf_counter()
+            seen_urls = {d.get("url") for d in cached_docs if d.get("url")}
             try:
-                seeds_resp = await crawler_client.discover_seeds(
-                    neutron_pb.DiscoverSeedsRequest(
-                        query=clean_query, max_urls=8, mode=mode
+                async for ev in crawler_client.stream_crawl(
+                    neutron_pb.StreamCrawlRequest(
+                        query=clean_query,
+                        max_pages=8,
+                        mode=mode,
+                        skip_urls=[] if refresh else list(seen_urls),
+                        include_full_text=True,
+                        force_refresh=refresh,
                     ),
                     headers=headers,
-                )
-                for m in seeds_resp.metrics:
-                    yield {
-                        "event": "discovery_result",
-                        "data": json.dumps(
-                            {
-                                "source": m.source,
-                                "urls_found": int(m.urls_found),
-                                "duration_ms": int(m.duration_ms),
-                                "status": m.status,
-                            }
-                        ),
-                    }
-
-                existing_urls = {d.get("url") for d in cached_docs if d.get("url")}
-                crawl_targets = [u for u in seeds_resp.urls if u not in existing_urls]
-
-                if crawl_targets:
-                    yield {
-                        "event": "status",
-                        "data": json.dumps(
-                            {"message": f"Fetching {len(crawl_targets)} live web pages..."}
-                        ),
-                    }
-
-                    crawl_events: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
-
-                    async def _crawl_one(url: str) -> None:
-                        host = urllib.parse.urlsplit(url).netloc.lower()
-                        host = host[4:] if host.startswith("www.") else (host or url)
-                        await crawl_events.put(
-                            {"event": "crawl_start", "data": {"url": url, "domain": host}}
-                        )
-                        try:
-                            resp = await crawler_client.crawl_url(
-                                neutron_pb.CrawlUrlRequest(
-                                    url=url,
-                                    query=clean_query,
-                                    fast_live=True,
-                                    include_full_text=True,
-                                    check_robots=True,
-                                ),
-                                headers=headers,
-                            )
-                            oc = resp.outcome
-                            if oc.robots_blocked:
-                                await crawl_events.put(
-                                    {
-                                        "event": "crawl_blocked",
-                                        "data": {
-                                            "url": url,
-                                            "domain": oc.domain,
-                                            "reason": oc.error or "robots.txt",
-                                        },
-                                    }
-                                )
-                            elif oc.ok and oc.document.url:
-                                collected_proto.append(oc.document)
-                                pub_doc = proto_to_doc(oc.document, include_full_text=False)
-                                await crawl_events.put(
-                                    {
-                                        "event": "crawl_success",
-                                        "data": {
-                                            "url": url,
-                                            "domain": oc.domain,
-                                            "title": pub_doc.get("title", oc.domain),
-                                            "duration_ms": int(oc.duration_ms),
-                                        },
-                                    }
-                                )
-                                await crawl_events.put(
-                                    {"event": "live_result", "data": pub_doc}
-                                )
-                            else:
-                                await crawl_events.put(
-                                    {
-                                        "event": "crawl_error",
-                                        "data": {
-                                            "url": url,
-                                            "domain": oc.domain,
-                                            "error": oc.error or "skipped",
-                                        },
-                                    }
-                                )
-                        except Exception as exc:
-                            await crawl_events.put(
+                ):
+                    if await request.is_disconnected():
+                        return
+                    etype = ev.event_type
+                    if etype == "discovery_result":
+                        m = ev.metric
+                        yield {
+                            "event": "discovery_result",
+                            "data": json.dumps(
                                 {
-                                    "event": "crawl_error",
-                                    "data": {"url": url, "domain": url, "error": str(exc)[:80]},
+                                    "source": m.source,
+                                    "urls_found": int(m.urls_found),
+                                    "duration_ms": int(m.duration_ms),
+                                    "status": m.status,
                                 }
-                            )
-
-                    tasks = [asyncio.create_task(_crawl_one(u)) for u in crawl_targets]
-                    gather_fut = asyncio.gather(*tasks, return_exceptions=True)
-                    deadline = time.monotonic() + settings.LIVE_JIT_DEADLINE_SECONDS
-
-                    while not gather_fut.done() or not crawl_events.empty():
-                        if await request.is_disconnected():
-                            for t in tasks:
-                                t.cancel()
-                            return
-                        if time.monotonic() >= deadline and not gather_fut.done():
-                            for t in tasks:
-                                if not t.done():
-                                    t.cancel()
-                            break
-                        try:
-                            ev = await asyncio.wait_for(crawl_events.get(), timeout=0.1)
-                            yield {"event": ev["event"], "data": json.dumps(ev["data"])}
-                        except asyncio.TimeoutError:
-                            continue
-
-                    while not crawl_events.empty():
-                        ev = crawl_events.get_nowait()
-                        yield {"event": ev["event"], "data": json.dumps(ev["data"])}
+                            ),
+                        }
+                    elif etype == "status":
+                        yield {"event": "status", "data": json.dumps({"message": ev.message})}
+                    elif etype == "crawl_start":
+                        yield {
+                            "event": "crawl_start",
+                            "data": json.dumps({"url": ev.url, "domain": ev.domain}),
+                        }
+                    elif etype == "crawl_blocked":
+                        oc = ev.outcome
+                        yield {
+                            "event": "crawl_blocked",
+                            "data": json.dumps(
+                                {
+                                    "url": ev.url,
+                                    "domain": oc.domain or ev.domain,
+                                    "reason": oc.error or "robots.txt",
+                                }
+                            ),
+                        }
+                    elif etype == "crawl_success" and ev.outcome.document.url:
+                        oc = ev.outcome
+                        pub_doc = proto_to_doc(oc.document, include_full_text=False)
+                        if pub_doc.get("url") not in seen_urls:
+                            seen_urls.add(pub_doc["url"])
+                            collected_proto.append(oc.document)
+                            added_live = True
+                        yield {
+                            "event": "crawl_success",
+                            "data": json.dumps(
+                                {
+                                    "url": ev.url,
+                                    "domain": oc.domain or ev.domain,
+                                    "title": pub_doc.get("title", oc.domain or ev.domain),
+                                    "duration_ms": int(oc.duration_ms),
+                                }
+                            ),
+                        }
+                        yield {"event": "live_result", "data": json.dumps(pub_doc)}
+                    elif etype == "crawl_error":
+                        oc = ev.outcome
+                        yield {
+                            "event": "crawl_error",
+                            "data": json.dumps(
+                                {
+                                    "url": ev.url,
+                                    "domain": oc.domain or ev.domain,
+                                    "error": oc.error or "skipped",
+                                }
+                            ),
+                        }
             except Exception as exc:
-                logger.warning("gateway_stream_crawler_failed", error=str(exc))
+                logger.warning("gateway_stream_crawler_failed", request_id=req_id, error=str(exc))
+            crawl_ms = round((time.perf_counter() - crawl_t0) * 1000)
 
+        final_answer: Optional[Dict[str, Any]] = None
         if collected_proto and not await request.is_disconnected():
-            # Reuse cached synthesis if no live documents were added
             if (
-                cached_resp is not None
-                and len(collected_proto) == len(cached_docs)
+                not added_live
+                and not refresh
+                and cached_resp is not None
                 and cached_resp.has_answer
             ):
-                ans = proto_to_answer(cached_resp.answer, has_answer=True)
-                if ans:
-                    yield {"event": "answer", "data": json.dumps(ans)}
+                final_answer = proto_to_answer(cached_resp.answer, has_answer=True)
+                if final_answer:
+                    yield {"event": "answer", "data": json.dumps(final_answer)}
             else:
+                synth_t0 = time.perf_counter()
                 try:
                     synth = await search_client.synthesize_answer(
                         neutron_pb.SynthesizeAnswerRequest(
@@ -749,13 +874,37 @@ async def search_stream(
                         ),
                         headers=headers,
                     )
-                    ans = proto_to_answer(synth.answer, has_answer=synth.has_answer)
-                    if ans:
-                        yield {"event": "answer", "data": json.dumps(ans)}
+                    final_answer = proto_to_answer(synth.answer, has_answer=synth.has_answer)
+                    if final_answer:
+                        yield {"event": "answer", "data": json.dumps(final_answer)}
                 except Exception as exc:
-                    logger.warning("gateway_stream_synth_failed", error=str(exc))
+                    logger.warning("gateway_stream_synth_failed", request_id=req_id, error=str(exc))
+                synth_ms = round((time.perf_counter() - synth_t0) * 1000)
 
-        yield {"event": "done", "data": json.dumps({"completed": True})}
+        final_docs = [proto_to_doc(d, include_full_text=False) for d in collected_proto]
+        if final_docs:
+            _search_cache.set(
+                stream_cache_key,
+                {"results": final_docs, "answer": final_answer},
+            )
+
+        total_ms = round((time.perf_counter() - total_t0) * 1000)
+        yield {
+            "event": "done",
+            "data": json.dumps(
+                {
+                    "completed": True,
+                    "cache_hit": False,
+                    "request_id": req_id,
+                    "timings": {
+                        "index_ms": index_ms,
+                        "crawl_ms": crawl_ms,
+                        "synth_ms": synth_ms,
+                        "total_ms": total_ms,
+                    },
+                }
+            ),
+        }
 
     return EventSourceResponse(event_generator())
 

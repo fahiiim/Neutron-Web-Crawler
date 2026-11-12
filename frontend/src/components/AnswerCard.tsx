@@ -52,9 +52,16 @@ export const AnswerCard: React.FC<AnswerCardProps> = ({
       className="surface-card rounded-xl p-5 sm:p-6 mb-6"
     >
       <div className="flex items-center justify-between gap-2 mb-3">
-        <span className="text-xs font-medium tracking-wide uppercase text-neutral-400">
-          Summary
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-medium tracking-wide uppercase text-neutral-400">
+            Summary
+          </span>
+          {answer.mode === "gemini_grounded" && (
+            <span className="font-mono-tech text-[10px] text-neutral-500 border border-white/10 rounded px-1.5 py-0.5">
+              Gemini
+            </span>
+          )}
+        </div>
         {answer.citations && answer.citations.length > 0 && (
           <span className="font-mono-tech text-[11px] text-neutral-500">
             {answer.citations.length}{" "}

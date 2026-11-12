@@ -14,7 +14,12 @@ from spaces.crawler import app as crawler_app_module
 from spaces.crawler.bloom import URLBloomFilter
 from spaces.crawler.compression import compress_text, decompress_text
 from spaces.crawler.config import CrawlerSettings
-from spaces.crawler.db_turso import TursoCrawlerClient, sanitize_fts_terms
+from spaces.crawler.db_turso import (
+    TursoCrawlerClient,
+    _format_fts_term,
+    normalize_search_query,
+    sanitize_fts_terms,
+)
 from spaces.crawler.dedup import (
     canonicalize_url,
     compute_simhash,
@@ -32,8 +37,11 @@ from spaces.crawler.parser import (
 from spaces.crawler.robots import RobotsTxtManager
 from spaces.crawler.sitemap import discover_sitemap_urls
 from spaces.crawler.synthesis import (
+    attach_synthesis_and_excerpts,
     extract_query_focused_snippet,
+    sort_hits_by_relevance,
     synthesize_grounded_answer,
+    synthesize_with_gemini,
 )
 from spaces.gateway import app as gateway_app_module
 from spaces.gateway.config import GatewaySettings
@@ -897,6 +905,82 @@ class TestFastAPIEndpoints(unittest.TestCase):
                 self.assertEqual(d_res.status_code, 200)
                 self.assertEqual(d_res.json()["url_hash"], "-8197675117857346549")
                 self.assertEqual(d_res.json()["full_markdown"], "# Precision OK")
+
+    def test_joining_sql_stemming_filler_removal_and_reranking(self):
+        q = "what is the main purpose of the joining in SQL"
+        self.assertEqual(normalize_search_query(q), "joining in SQL")
+        self.assertEqual(sanitize_fts_terms(q), ["joining", "sql"])
+        fts_tok = _format_fts_term("joining")
+        self.assertIn('"join"', fts_tok)
+        self.assertIn('"joins"', fts_tok)
+
+        noisy_readme = {
+            "url_hash": "1",
+            "url": "https://github.com/student/course-enrollment",
+            "title": "course-enrollment",
+            "snippet": "The main purpose of this project was learning MySQL queries.",
+            "score": 9.5,
+        }
+        sql_join_doc = {
+            "url_hash": "2",
+            "url": "https://www.w3schools.com/sql/sql_join.asp",
+            "title": "SQL Joins",
+            "snippet": "A JOIN clause is used to combine rows from two or more tables based on a related column.",
+            "score": 2.0,
+        }
+        ranked = sort_hits_by_relevance(q, [noisy_readme, sql_join_doc])
+        self.assertEqual(ranked[0]["url"], sql_join_doc["url"])
+
+    def test_gemini_synthesis_and_graceful_fallback(self):
+        import asyncio
+
+        docs = [
+            {
+                "url_hash": "10",
+                "url": "https://www.postgresql.org/docs/current/tutorial-join.html",
+                "title": "Joins Between Tables",
+                "snippet": "SQL joins combine columns from multiple related tables in one query.",
+                "_full_text": "SQL joins combine rows from two or more tables using a related column such as a foreign key [1].",
+            }
+        ]
+
+        fake_ok_resp = MagicMock()
+        fake_ok_resp.status_code = 200
+        fake_ok_resp.json.return_value = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "text": "A SQL JOIN combines rows from related tables using matching key columns [1]."
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+
+        async def _run_ok():
+            with patch("httpx.AsyncClient.post", AsyncMock(return_value=fake_ok_resp)):
+                return await synthesize_with_gemini(
+                    "sql join", docs, api_key="test-key", model="gemini-2.5-flash"
+                )
+
+        gem_ans = asyncio.run(_run_ok())
+        self.assertIsNotNone(gem_ans)
+        self.assertEqual(gem_ans["mode"], "gemini_grounded")
+        self.assertIn("[1]", gem_ans["summary"])
+        self.assertEqual(gem_ans["citations"][0]["url"], docs[0]["url"])
+
+        async def _run_fallback():
+            with patch("httpx.AsyncClient.post", AsyncMock(side_effect=RuntimeError("quota"))):
+                return await attach_synthesis_and_excerpts(
+                    "sql join", docs, gemini_api_key="test-key"
+                )
+
+        _, fallback_ans = asyncio.run(_run_fallback())
+        self.assertIsNotNone(fallback_ans)
+        self.assertEqual(fallback_ans["mode"], "extractive_grounded")
 
 
 if __name__ == "__main__":

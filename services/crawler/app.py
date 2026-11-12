@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 import time
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, AsyncIterator, Dict, List, Optional
 
 from connectrpc.request import RequestContext
 from curl_cffi.requests import AsyncSession
@@ -44,6 +44,74 @@ def _to_metric_proto(metric: Dict[str, Any]) -> neutron_pb.DiscoveryMetric:
     )
 
 
+async def _crawl_one_outcome(
+    session: AsyncSession,
+    target_url: str,
+    query: str,
+    *,
+    fast_live: bool,
+    include_full_text: bool,
+    check_robots: bool,
+) -> neutron_pb.CrawlOutcome:
+    """Execute robots check + live fetch for one URL and normalize into CrawlOutcome."""
+    domain = extract_domain_host(target_url)
+    t0 = time.perf_counter()
+
+    if not target_url:
+        return neutron_pb.CrawlOutcome(ok=False, error="Empty URL", domain=domain)
+
+    try:
+        if check_robots:
+            allowed = await robots_manager.is_allowed(target_url)
+            if not allowed:
+                return neutron_pb.CrawlOutcome(
+                    ok=False,
+                    robots_blocked=True,
+                    error="robots.txt",
+                    domain=domain,
+                    duration_ms=round((time.perf_counter() - t0) * 1000),
+                )
+
+        doc = await legacy_crawler.fetch_and_index_document(
+            session,
+            target_url,
+            check_robots=False,
+            skip_if_seen=False,
+            query=(query or "").strip() or None,
+            fast_live=fast_live,
+            include_full_text=include_full_text,
+        )
+        dur_ms = round((time.perf_counter() - t0) * 1000)
+
+        if not doc:
+            return neutron_pb.CrawlOutcome(
+                ok=False,
+                error="blocked, empty, or off-topic",
+                domain=domain,
+                duration_ms=dur_ms,
+            )
+
+        if doc.get("_full_text"):
+            doc["snippet"] = (
+                extract_query_focused_snippet(query, doc["_full_text"], max_len=320)
+                or str(doc.get("snippet") or "")[:320]
+            )
+
+        return neutron_pb.CrawlOutcome(
+            ok=True,
+            domain=domain,
+            duration_ms=dur_ms,
+            document=doc_to_proto(doc, include_full_text=include_full_text),
+        )
+    except Exception as exc:
+        return neutron_pb.CrawlOutcome(
+            ok=False,
+            error=str(exc)[:120],
+            domain=domain,
+            duration_ms=round((time.perf_counter() - t0) * 1000),
+        )
+
+
 class CrawlerServiceImpl:
     """ConnectRPC/gRPC implementation for multi-source discovery and live crawling."""
 
@@ -77,80 +145,119 @@ class CrawlerServiceImpl:
         /,
     ) -> neutron_pb.CrawlUrlResponse:
         target_url = (request.url or "").strip()
-        domain = extract_domain_host(target_url)
-        t0 = time.perf_counter()
+        async with AsyncSession(impersonate="chrome124") as session:
+            outcome = await _crawl_one_outcome(
+                session,
+                target_url,
+                request.query or "",
+                fast_live=bool(request.fast_live),
+                include_full_text=bool(request.include_full_text),
+                check_robots=bool(request.check_robots),
+            )
+        return neutron_pb.CrawlUrlResponse(outcome=outcome)
 
-        if not target_url:
-            return neutron_pb.CrawlUrlResponse(
-                outcome=neutron_pb.CrawlOutcome(
-                    ok=False, error="Empty URL", domain=domain
-                )
+    async def stream_crawl(
+        self,
+        request: neutron_pb.StreamCrawlRequest,
+        ctx: RequestContext,
+        /,
+    ) -> AsyncIterator[neutron_pb.CrawlStreamEvent]:
+        """Discover live candidate URLs and stream crawl outcomes over a single ConnectRPC stream."""
+        clean_query = (request.query or "").strip()
+        if not clean_query:
+            return
+
+        max_pages = max(1, min(int(request.max_pages or 8), 20))
+        mode = (request.mode or "all").strip().lower()
+        skip_urls = set() if request.force_refresh else set(request.skip_urls or ())
+        include_full_text = bool(request.include_full_text)
+
+        candidates, metrics = await discover_seed_urls_detailed(
+            clean_query,
+            max_urls=max_pages,
+            mode=mode,
+            skip_domains=legacy_crawler._get_active_waf_domains(),
+        )
+        for m in metrics:
+            yield neutron_pb.CrawlStreamEvent(
+                event_type="discovery_result",
+                metric=_to_metric_proto(m),
             )
 
-        try:
-            if request.check_robots:
-                allowed = await robots_manager.is_allowed(target_url)
-                if not allowed:
-                    return neutron_pb.CrawlUrlResponse(
-                        outcome=neutron_pb.CrawlOutcome(
-                            ok=False,
-                            robots_blocked=True,
-                            error="robots.txt",
-                            domain=domain,
-                            duration_ms=round((time.perf_counter() - t0) * 1000),
-                        )
-                    )
+        fetch_targets = [u for u in candidates if u not in skip_urls]
+        if not fetch_targets:
+            return
 
-            async with AsyncSession(impersonate="chrome124") as session:
-                doc = await legacy_crawler.fetch_and_index_document(
-                    session,
-                    target_url,
-                    check_robots=False,
-                    query=(request.query or "").strip() or None,
-                    fast_live=bool(request.fast_live),
-                    include_full_text=bool(request.include_full_text),
-                )
-            dur_ms = round((time.perf_counter() - t0) * 1000)
+        yield neutron_pb.CrawlStreamEvent(
+            event_type="status",
+            message=f"Fetching {len(fetch_targets)} live web pages...",
+        )
 
-            if not doc:
-                return neutron_pb.CrawlUrlResponse(
-                    outcome=neutron_pb.CrawlOutcome(
-                        ok=False,
-                        error="blocked, empty, or off-topic",
+        event_queue: asyncio.Queue[Optional[neutron_pb.CrawlStreamEvent]] = asyncio.Queue()
+        sem = asyncio.Semaphore(settings.MAX_CONCURRENT_JIT_FETCHES)
+
+        async with AsyncSession(impersonate="chrome124") as session:
+            async def _worker(url: str) -> None:
+                domain = extract_domain_host(url)
+                await event_queue.put(
+                    neutron_pb.CrawlStreamEvent(
+                        event_type="crawl_start",
+                        url=url,
                         domain=domain,
-                        duration_ms=dur_ms,
+                    )
+                )
+                async with sem:
+                    outcome = await _crawl_one_outcome(
+                        session,
+                        url,
+                        clean_query,
+                        fast_live=True,
+                        include_full_text=include_full_text,
+                        check_robots=True,
+                    )
+                if outcome.robots_blocked:
+                    evt_type = "crawl_blocked"
+                elif outcome.ok and outcome.document.url:
+                    evt_type = "crawl_success"
+                else:
+                    evt_type = "crawl_error"
+                await event_queue.put(
+                    neutron_pb.CrawlStreamEvent(
+                        event_type=evt_type,
+                        url=url,
+                        domain=outcome.domain or domain,
+                        outcome=outcome,
                     )
                 )
 
-            if doc.get("_full_text"):
-                doc["snippet"] = (
-                    extract_query_focused_snippet(
-                        request.query,
-                        doc["_full_text"],
-                        max_len=320,
+            async def _run_batch() -> None:
+                tasks = [asyncio.create_task(_worker(u)) for u in fetch_targets]
+                try:
+                    done, pending = await asyncio.wait(
+                        tasks, timeout=settings.LIVE_JIT_DEADLINE_SECONDS
                     )
-                    or str(doc.get("snippet") or "")[:320]
-                )
+                    for p in pending:
+                        p.cancel()
+                    for t in done:
+                        if not t.cancelled():
+                            t.exception()
+                finally:
+                    await event_queue.put(None)
 
-            return neutron_pb.CrawlUrlResponse(
-                outcome=neutron_pb.CrawlOutcome(
-                    ok=True,
-                    domain=domain,
-                    duration_ms=dur_ms,
-                    document=doc_to_proto(
-                        doc, include_full_text=bool(request.include_full_text)
-                    ),
-                )
-            )
-        except Exception as exc:
-            return neutron_pb.CrawlUrlResponse(
-                outcome=neutron_pb.CrawlOutcome(
-                    ok=False,
-                    error=str(exc)[:120],
-                    domain=domain,
-                    duration_ms=round((time.perf_counter() - t0) * 1000),
-                )
-            )
+            runner = asyncio.create_task(_run_batch())
+            try:
+                while True:
+                    item = await event_queue.get()
+                    if item is None:
+                        break
+                    yield item
+            finally:
+                if not runner.done():
+                    runner.cancel()
+                    try:
+                        await runner
+                    except asyncio.CancelledError:
+                        pass
 
     async def discover_and_crawl(
         self,

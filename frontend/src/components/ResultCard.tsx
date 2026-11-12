@@ -20,6 +20,20 @@ function sanitizeSnippetHtml(raw: string): string {
     .trim();
 }
 
+function formatRelativeAge(crawledAt?: string | null): string | null {
+  if (!crawledAt) return null;
+  const isoLike = crawledAt.includes("T") ? crawledAt : `${crawledAt.replace(" ", "T")}Z`;
+  const ts = Date.parse(isoLike);
+  if (Number.isNaN(ts)) return null;
+  const diffSec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (diffSec < 60) return "just now";
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
+  const days = Math.floor(diffSec / 86400);
+  if (days < 365) return `${days}d ago`;
+  return `${Math.floor(days / 365)}y ago`;
+}
+
 export const ResultCard: React.FC<ResultCardProps> = ({
   result,
   index,
@@ -48,6 +62,7 @@ export const ResultCard: React.FC<ResultCardProps> = ({
   }
 
   const safeSnippet = sanitizeSnippetHtml(result.snippet || "");
+  const crawledAge = formatRelativeAge(result.crawled_at);
 
   return (
     <article
@@ -62,6 +77,11 @@ export const ResultCard: React.FC<ResultCardProps> = ({
         <span className="truncate font-mono-tech text-[11px] text-neutral-400">
           {displayUrl}
         </span>
+        {crawledAge && (
+          <span className="shrink-0 font-mono-tech text-[11px] text-neutral-600">
+            · {crawledAge}
+          </span>
+        )}
       </div>
 
       <h3 className="text-[17px] font-medium leading-snug">

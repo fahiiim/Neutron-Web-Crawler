@@ -70,7 +70,7 @@ class Citation(Message[_CitationFields]):
         title: str
         domain: str
 
-_GroundedAnswerFields: TypeAlias = Literal["summary", "citations"]
+_GroundedAnswerFields: TypeAlias = Literal["summary", "citations", "mode"]
 
 class GroundedAnswer(Message[_GroundedAnswerFields]):
     """
@@ -87,9 +87,13 @@ class GroundedAnswer(Message[_GroundedAnswerFields]):
             ```proto
             repeated neutron.v1.Citation citations = 2;
             ```
+        mode:
+            ```proto
+            string mode = 3;
+            ```
     """
 
-    __slots__ = ("summary", "citations")
+    __slots__ = ("summary", "citations", "mode")
 
     if TYPE_CHECKING:
 
@@ -98,11 +102,13 @@ class GroundedAnswer(Message[_GroundedAnswerFields]):
             *,
             summary: str = "",
             citations: list[Citation] | None = None,
+            mode: str = "",
         ) -> None:
             pass
 
         summary: str
         citations: list[Citation]
+        mode: str
 
 _SearchDocumentFields: TypeAlias = Literal["url_hash", "url", "title", "snippet", "score", "crawled_at", "full_markdown", "full_text"]
 
@@ -1026,7 +1032,7 @@ class DiscoverSeedsResponse(Message[_DiscoverSeedsResponseFields]):
         urls: list[str]
         metrics: list[DiscoveryMetric]
 
-_CrawlUrlRequestFields: TypeAlias = Literal["url", "query", "fast_live", "include_full_text", "check_robots"]
+_CrawlUrlRequestFields: TypeAlias = Literal["url", "query", "fast_live", "include_full_text", "check_robots", "force_refresh"]
 
 class CrawlUrlRequest(Message[_CrawlUrlRequestFields]):
     """
@@ -1055,9 +1061,13 @@ class CrawlUrlRequest(Message[_CrawlUrlRequestFields]):
             ```proto
             bool check_robots = 5;
             ```
+        force_refresh:
+            ```proto
+            bool force_refresh = 6;
+            ```
     """
 
-    __slots__ = ("url", "query", "fast_live", "include_full_text", "check_robots")
+    __slots__ = ("url", "query", "fast_live", "include_full_text", "check_robots", "force_refresh")
 
     if TYPE_CHECKING:
 
@@ -1069,6 +1079,7 @@ class CrawlUrlRequest(Message[_CrawlUrlRequestFields]):
             fast_live: bool = False,
             include_full_text: bool = False,
             check_robots: bool = False,
+            force_refresh: bool = False,
         ) -> None:
             pass
 
@@ -1077,6 +1088,7 @@ class CrawlUrlRequest(Message[_CrawlUrlRequestFields]):
         fast_live: bool
         include_full_text: bool
         check_robots: bool
+        force_refresh: bool
 
 _CrawlUrlResponseFields: TypeAlias = Literal["outcome"]
 
@@ -1106,7 +1118,123 @@ class CrawlUrlResponse(Message[_CrawlUrlResponseFields]):
 
         outcome: CrawlOutcome | None
 
-_GatewaySearchRequestFields: TypeAlias = Literal["query", "limit", "mode", "include_markdown"]
+_StreamCrawlRequestFields: TypeAlias = Literal["query", "max_pages", "mode", "skip_urls", "include_full_text", "force_refresh"]
+
+class StreamCrawlRequest(Message[_StreamCrawlRequestFields]):
+    """
+    ```proto
+    message neutron.v1.StreamCrawlRequest
+    ```
+
+    Attributes:
+        query:
+            ```proto
+            string query = 1;
+            ```
+        max_pages:
+            ```proto
+            int32 max_pages = 2;
+            ```
+        mode:
+            ```proto
+            string mode = 3;
+            ```
+        skip_urls:
+            ```proto
+            repeated string skip_urls = 4;
+            ```
+        include_full_text:
+            ```proto
+            bool include_full_text = 5;
+            ```
+        force_refresh:
+            ```proto
+            bool force_refresh = 6;
+            ```
+    """
+
+    __slots__ = ("query", "max_pages", "mode", "skip_urls", "include_full_text", "force_refresh")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            query: str = "",
+            max_pages: int = 0,
+            mode: str = "",
+            skip_urls: list[str] | None = None,
+            include_full_text: bool = False,
+            force_refresh: bool = False,
+        ) -> None:
+            pass
+
+        query: str
+        max_pages: int
+        mode: str
+        skip_urls: list[str]
+        include_full_text: bool
+        force_refresh: bool
+
+_CrawlStreamEventFields: TypeAlias = Literal["event_type", "metric", "outcome", "url", "domain", "message"]
+
+class CrawlStreamEvent(Message[_CrawlStreamEventFields]):
+    """
+    ```proto
+    message neutron.v1.CrawlStreamEvent
+    ```
+
+    Attributes:
+        event_type:
+            ```proto
+            string event_type = 1;
+            ```
+        metric:
+            ```proto
+            optional neutron.v1.DiscoveryMetric metric = 2;
+            ```
+        outcome:
+            ```proto
+            optional neutron.v1.CrawlOutcome outcome = 3;
+            ```
+        url:
+            ```proto
+            string url = 4;
+            ```
+        domain:
+            ```proto
+            string domain = 5;
+            ```
+        message:
+            ```proto
+            string message = 6;
+            ```
+    """
+
+    __slots__ = ("event_type", "metric", "outcome", "url", "domain", "message")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            event_type: str = "",
+            metric: DiscoveryMetric | None = None,
+            outcome: CrawlOutcome | None = None,
+            url: str = "",
+            domain: str = "",
+            message: str = "",
+        ) -> None:
+            pass
+
+        event_type: str
+        metric: DiscoveryMetric | None
+        outcome: CrawlOutcome | None
+        url: str
+        domain: str
+        message: str
+
+_GatewaySearchRequestFields: TypeAlias = Literal["query", "limit", "mode", "include_markdown", "refresh"]
 
 class GatewaySearchRequest(Message[_GatewaySearchRequestFields]):
     """
@@ -1131,9 +1259,13 @@ class GatewaySearchRequest(Message[_GatewaySearchRequestFields]):
             ```proto
             bool include_markdown = 4;
             ```
+        refresh:
+            ```proto
+            bool refresh = 5;
+            ```
     """
 
-    __slots__ = ("query", "limit", "mode", "include_markdown")
+    __slots__ = ("query", "limit", "mode", "include_markdown", "refresh")
 
     if TYPE_CHECKING:
 
@@ -1144,6 +1276,7 @@ class GatewaySearchRequest(Message[_GatewaySearchRequestFields]):
             limit: int = 0,
             mode: str = "",
             include_markdown: bool = False,
+            refresh: bool = False,
         ) -> None:
             pass
 
@@ -1151,6 +1284,7 @@ class GatewaySearchRequest(Message[_GatewaySearchRequestFields]):
         limit: int
         mode: str
         include_markdown: bool
+        refresh: bool
 
 _GatewaySearchResponseFields: TypeAlias = Literal["query", "mode", "source", "total", "answer", "has_answer", "results"]
 
@@ -1218,7 +1352,7 @@ class GatewaySearchResponse(Message[_GatewaySearchResponseFields]):
 
 
 _DESC = file_desc(
-    b'\n\x18neutron/v1/neutron.proto\x12\nneutron.v1"{\n\x08Citation\x12\x14\n\x05index\x18\x01 \x01(\x05R\x05index\x12\x10\n\x03url\x18\x02 \x01(\tR\x03url\x12\x19\n\x08url_hash\x18\x03 \x01(\tR\x07urlHash\x12\x14\n\x05title\x18\x04 \x01(\tR\x05title\x12\x16\n\x06domain\x18\x05 \x01(\tR\x06domain"^\n\x0eGroundedAnswer\x12\x18\n\x07summary\x18\x01 \x01(\tR\x07summary\x122\n\tcitations\x18\x02 \x03(\x0b2\x14.neutron.v1.CitationR\tcitations"\xe4\x01\n\x0eSearchDocument\x12\x19\n\x08url_hash\x18\x01 \x01(\tR\x07urlHash\x12\x10\n\x03url\x18\x02 \x01(\tR\x03url\x12\x14\n\x05title\x18\x03 \x01(\tR\x05title\x12\x18\n\x07snippet\x18\x04 \x01(\tR\x07snippet\x12\x14\n\x05score\x18\x05 \x01(\x01R\x05score\x12\x1d\n\ncrawled_at\x18\x06 \x01(\tR\tcrawledAt\x12#\n\rfull_markdown\x18\x07 \x01(\tR\x0cfullMarkdown\x12\x1b\n\tfull_text\x18\x08 \x01(\tR\x08fullText"\xcf\x01\n\rStatsSnapshot\x12#\n\rpages_indexed\x18\x01 \x01(\x03R\x0cpagesIndexed\x12\'\n\x0fdomains_covered\x18\x02 \x01(\x03R\x0edomainsCovered\x12)\n\x10frontier_pending\x18\x03 \x01(\x03R\x0ffrontierPending\x12\'\n\x0fpayloads_stored\x18\x04 \x01(\x03R\x0epayloadsStored\x12\x1c\n\tconnected\x18\x05 \x01(\x08R\tconnected"\x97\x01\n\x0fDiscoveryMetric\x12\x16\n\x06source\x18\x01 \x01(\tR\x06source\x12\x1d\n\nurls_found\x18\x02 \x01(\x05R\turlsFound\x12\x1f\n\x0bduration_ms\x18\x03 \x01(\x05R\ndurationMs\x12\x16\n\x06status\x18\x04 \x01(\tR\x06status\x12\x14\n\x05error\x18\x05 \x01(\tR\x05error"\xcc\x01\n\x0cCrawlOutcome\x12\x0e\n\x02ok\x18\x01 \x01(\x08R\x02ok\x12%\n\x0erobots_blocked\x18\x02 \x01(\x08R\rrobotsBlocked\x12\x14\n\x05error\x18\x03 \x01(\tR\x05error\x12\x16\n\x06domain\x18\x04 \x01(\tR\x06domain\x12\x1f\n\x0bduration_ms\x18\x05 \x01(\x05R\ndurationMs\x126\n\x08document\x18\x06 \x01(\x0b2\x1a.neutron.v1.SearchDocumentR\x08document"~\n\x11QueryIndexRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x14\n\x05limit\x18\x02 \x01(\x05R\x05limit\x12\x12\n\x04mode\x18\x03 \x01(\tR\x04mode\x12)\n\x10include_markdown\x18\x04 \x01(\x08R\x0fincludeMarkdown"\xbe\x01\n\x12QueryIndexResponse\x124\n\x07results\x18\x01 \x03(\x0b2\x1a.neutron.v1.SearchDocumentR\x07results\x122\n\x06answer\x18\x02 \x01(\x0b2\x1a.neutron.v1.GroundedAnswerR\x06answer\x12\x1f\n\x0bduration_ms\x18\x03 \x01(\x05R\ndurationMs\x12\x1d\n\nhas_answer\x18\x04 \x01(\x08R\thasAnswer"\xb9\x01\n\x17SynthesizeAnswerRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x128\n\tdocuments\x18\x02 \x03(\x0b2\x1a.neutron.v1.SearchDocumentR\tdocuments\x12)\n\x10include_markdown\x18\x03 \x01(\x08R\x0fincludeMarkdown\x12#\n\rmax_sentences\x18\x04 \x01(\x05R\x0cmaxSentences"\xa3\x01\n\x18SynthesizeAnswerResponse\x124\n\x07results\x18\x01 \x03(\x0b2\x1a.neutron.v1.SearchDocumentR\x07results\x122\n\x06answer\x18\x02 \x01(\x0b2\x1a.neutron.v1.GroundedAnswerR\x06answer\x12\x1d\n\nhas_answer\x18\x03 \x01(\x08R\thasAnswer"/\n\x12GetDocumentRequest\x12\x19\n\x08url_hash\x18\x01 \x01(\tR\x07urlHash"\xca\x01\n\x13GetDocumentResponse\x12\x14\n\x05found\x18\x01 \x01(\x08R\x05found\x12\x19\n\x08url_hash\x18\x02 \x01(\tR\x07urlHash\x12\x10\n\x03url\x18\x03 \x01(\tR\x03url\x12\x14\n\x05title\x18\x04 \x01(\tR\x05title\x12\x1d\n\ncrawled_at\x18\x05 \x01(\tR\tcrawledAt\x12#\n\rfull_markdown\x18\x06 \x01(\tR\x0cfullMarkdown\x12\x16\n\x06source\x18\x07 \x01(\tR\x06source"<\n\x0eSuggestRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x14\n\x05limit\x18\x02 \x01(\x05R\x05limit"I\n\x0fSuggestResponse\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12 \n\x0bsuggestions\x18\x02 \x03(\tR\x0bsuggestions"*\n\x12GetTrendingRequest\x12\x14\n\x05limit\x18\x01 \x01(\x05R\x05limit"9\n\rTrendingTopic\x12\x14\n\x05topic\x18\x01 \x01(\tR\x05topic\x12\x12\n\x04hits\x18\x02 \x01(\x03R\x04hits"L\n\x13GetTrendingResponse\x125\n\x08trending\x18\x01 \x03(\x0b2\x19.neutron.v1.TrendingTopicR\x08trending"\x11\n\x0fGetStatsRequest"C\n\x10GetStatsResponse\x12/\n\x05stats\x18\x01 \x01(\x0b2\x19.neutron.v1.StatsSnapshotR\x05stats"-\n\x15RecordHotTopicRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query"(\n\x16RecordHotTopicResponse\x12\x0e\n\x02ok\x18\x01 \x01(\x08R\x02ok"\xa9\x01\n\x17DiscoverAndCrawlRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x1b\n\tmax_pages\x18\x02 \x01(\x05R\x08maxPages\x12\x12\n\x04mode\x18\x03 \x01(\tR\x04mode\x12\x1b\n\tskip_urls\x18\x04 \x03(\tR\x08skipUrls\x12*\n\x11include_full_text\x18\x05 \x01(\x08R\x0fincludeFullText"\x8b\x01\n\x18DiscoverAndCrawlResponse\x128\n\tdocuments\x18\x01 \x03(\x0b2\x1a.neutron.v1.SearchDocumentR\tdocuments\x125\n\x07metrics\x18\x02 \x03(\x0b2\x1b.neutron.v1.DiscoveryMetricR\x07metrics"[\n\x14DiscoverSeedsRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x19\n\x08max_urls\x18\x02 \x01(\x05R\x07maxUrls\x12\x12\n\x04mode\x18\x03 \x01(\tR\x04mode"b\n\x15DiscoverSeedsResponse\x12\x12\n\x04urls\x18\x01 \x03(\tR\x04urls\x125\n\x07metrics\x18\x02 \x03(\x0b2\x1b.neutron.v1.DiscoveryMetricR\x07metrics"\xa5\x01\n\x0fCrawlUrlRequest\x12\x10\n\x03url\x18\x01 \x01(\tR\x03url\x12\x14\n\x05query\x18\x02 \x01(\tR\x05query\x12\x1b\n\tfast_live\x18\x03 \x01(\x08R\x08fastLive\x12*\n\x11include_full_text\x18\x04 \x01(\x08R\x0fincludeFullText\x12!\n\x0ccheck_robots\x18\x05 \x01(\x08R\x0bcheckRobots"F\n\x10CrawlUrlResponse\x122\n\x07outcome\x18\x01 \x01(\x0b2\x18.neutron.v1.CrawlOutcomeR\x07outcome"\x81\x01\n\x14GatewaySearchRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x14\n\x05limit\x18\x02 \x01(\x05R\x05limit\x12\x12\n\x04mode\x18\x03 \x01(\tR\x04mode\x12)\n\x10include_markdown\x18\x04 \x01(\x08R\x0fincludeMarkdown"\xf8\x01\n\x15GatewaySearchResponse\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x12\n\x04mode\x18\x02 \x01(\tR\x04mode\x12\x16\n\x06source\x18\x03 \x01(\tR\x06source\x12\x14\n\x05total\x18\x04 \x01(\x05R\x05total\x122\n\x06answer\x18\x05 \x01(\x0b2\x1a.neutron.v1.GroundedAnswerR\x06answer\x12\x1d\n\nhas_answer\x18\x06 \x01(\x08R\thasAnswer\x124\n\x07results\x18\x07 \x03(\x0b2\x1a.neutron.v1.SearchDocumentR\x07results2\xbf\x04\n\rSearchService\x12K\n\nQueryIndex\x12\x1d.neutron.v1.QueryIndexRequest\x1a\x1e.neutron.v1.QueryIndexResponse\x12]\n\x10SynthesizeAnswer\x12#.neutron.v1.SynthesizeAnswerRequest\x1a$.neutron.v1.SynthesizeAnswerResponse\x12N\n\x0bGetDocument\x12\x1e.neutron.v1.GetDocumentRequest\x1a\x1f.neutron.v1.GetDocumentResponse\x12B\n\x07Suggest\x12\x1a.neutron.v1.SuggestRequest\x1a\x1b.neutron.v1.SuggestResponse\x12N\n\x0bGetTrending\x12\x1e.neutron.v1.GetTrendingRequest\x1a\x1f.neutron.v1.GetTrendingResponse\x12E\n\x08GetStats\x12\x1b.neutron.v1.GetStatsRequest\x1a\x1c.neutron.v1.GetStatsResponse\x12W\n\x0eRecordHotTopic\x12!.neutron.v1.RecordHotTopicRequest\x1a".neutron.v1.RecordHotTopicResponse2\x8c\x02\n\x0eCrawlerService\x12]\n\x10DiscoverAndCrawl\x12#.neutron.v1.DiscoverAndCrawlRequest\x1a$.neutron.v1.DiscoverAndCrawlResponse\x12T\n\rDiscoverSeeds\x12 .neutron.v1.DiscoverSeedsRequest\x1a!.neutron.v1.DiscoverSeedsResponse\x12E\n\x08CrawlUrl\x12\x1b.neutron.v1.CrawlUrlRequest\x1a\x1c.neutron.v1.CrawlUrlResponse2\xba\x02\n\x0eGatewayService\x12M\n\x06Search\x12 .neutron.v1.GatewaySearchRequest\x1a!.neutron.v1.GatewaySearchResponse\x12B\n\x07Suggest\x12\x1a.neutron.v1.SuggestRequest\x1a\x1b.neutron.v1.SuggestResponse\x12E\n\x08GetStats\x12\x1b.neutron.v1.GetStatsRequest\x1a\x1c.neutron.v1.GetStatsResponse\x12N\n\x0bGetDocument\x12\x1e.neutron.v1.GetDocumentRequest\x1a\x1f.neutron.v1.GetDocumentResponseb\x06proto3',
+    b'\n\x18neutron/v1/neutron.proto\x12\nneutron.v1"{\n\x08Citation\x12\x14\n\x05index\x18\x01 \x01(\x05R\x05index\x12\x10\n\x03url\x18\x02 \x01(\tR\x03url\x12\x19\n\x08url_hash\x18\x03 \x01(\tR\x07urlHash\x12\x14\n\x05title\x18\x04 \x01(\tR\x05title\x12\x16\n\x06domain\x18\x05 \x01(\tR\x06domain"r\n\x0eGroundedAnswer\x12\x18\n\x07summary\x18\x01 \x01(\tR\x07summary\x122\n\tcitations\x18\x02 \x03(\x0b2\x14.neutron.v1.CitationR\tcitations\x12\x12\n\x04mode\x18\x03 \x01(\tR\x04mode"\xe4\x01\n\x0eSearchDocument\x12\x19\n\x08url_hash\x18\x01 \x01(\tR\x07urlHash\x12\x10\n\x03url\x18\x02 \x01(\tR\x03url\x12\x14\n\x05title\x18\x03 \x01(\tR\x05title\x12\x18\n\x07snippet\x18\x04 \x01(\tR\x07snippet\x12\x14\n\x05score\x18\x05 \x01(\x01R\x05score\x12\x1d\n\ncrawled_at\x18\x06 \x01(\tR\tcrawledAt\x12#\n\rfull_markdown\x18\x07 \x01(\tR\x0cfullMarkdown\x12\x1b\n\tfull_text\x18\x08 \x01(\tR\x08fullText"\xcf\x01\n\rStatsSnapshot\x12#\n\rpages_indexed\x18\x01 \x01(\x03R\x0cpagesIndexed\x12\'\n\x0fdomains_covered\x18\x02 \x01(\x03R\x0edomainsCovered\x12)\n\x10frontier_pending\x18\x03 \x01(\x03R\x0ffrontierPending\x12\'\n\x0fpayloads_stored\x18\x04 \x01(\x03R\x0epayloadsStored\x12\x1c\n\tconnected\x18\x05 \x01(\x08R\tconnected"\x97\x01\n\x0fDiscoveryMetric\x12\x16\n\x06source\x18\x01 \x01(\tR\x06source\x12\x1d\n\nurls_found\x18\x02 \x01(\x05R\turlsFound\x12\x1f\n\x0bduration_ms\x18\x03 \x01(\x05R\ndurationMs\x12\x16\n\x06status\x18\x04 \x01(\tR\x06status\x12\x14\n\x05error\x18\x05 \x01(\tR\x05error"\xcc\x01\n\x0cCrawlOutcome\x12\x0e\n\x02ok\x18\x01 \x01(\x08R\x02ok\x12%\n\x0erobots_blocked\x18\x02 \x01(\x08R\rrobotsBlocked\x12\x14\n\x05error\x18\x03 \x01(\tR\x05error\x12\x16\n\x06domain\x18\x04 \x01(\tR\x06domain\x12\x1f\n\x0bduration_ms\x18\x05 \x01(\x05R\ndurationMs\x126\n\x08document\x18\x06 \x01(\x0b2\x1a.neutron.v1.SearchDocumentR\x08document"~\n\x11QueryIndexRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x14\n\x05limit\x18\x02 \x01(\x05R\x05limit\x12\x12\n\x04mode\x18\x03 \x01(\tR\x04mode\x12)\n\x10include_markdown\x18\x04 \x01(\x08R\x0fincludeMarkdown"\xbe\x01\n\x12QueryIndexResponse\x124\n\x07results\x18\x01 \x03(\x0b2\x1a.neutron.v1.SearchDocumentR\x07results\x122\n\x06answer\x18\x02 \x01(\x0b2\x1a.neutron.v1.GroundedAnswerR\x06answer\x12\x1f\n\x0bduration_ms\x18\x03 \x01(\x05R\ndurationMs\x12\x1d\n\nhas_answer\x18\x04 \x01(\x08R\thasAnswer"\xb9\x01\n\x17SynthesizeAnswerRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x128\n\tdocuments\x18\x02 \x03(\x0b2\x1a.neutron.v1.SearchDocumentR\tdocuments\x12)\n\x10include_markdown\x18\x03 \x01(\x08R\x0fincludeMarkdown\x12#\n\rmax_sentences\x18\x04 \x01(\x05R\x0cmaxSentences"\xa3\x01\n\x18SynthesizeAnswerResponse\x124\n\x07results\x18\x01 \x03(\x0b2\x1a.neutron.v1.SearchDocumentR\x07results\x122\n\x06answer\x18\x02 \x01(\x0b2\x1a.neutron.v1.GroundedAnswerR\x06answer\x12\x1d\n\nhas_answer\x18\x03 \x01(\x08R\thasAnswer"/\n\x12GetDocumentRequest\x12\x19\n\x08url_hash\x18\x01 \x01(\tR\x07urlHash"\xca\x01\n\x13GetDocumentResponse\x12\x14\n\x05found\x18\x01 \x01(\x08R\x05found\x12\x19\n\x08url_hash\x18\x02 \x01(\tR\x07urlHash\x12\x10\n\x03url\x18\x03 \x01(\tR\x03url\x12\x14\n\x05title\x18\x04 \x01(\tR\x05title\x12\x1d\n\ncrawled_at\x18\x05 \x01(\tR\tcrawledAt\x12#\n\rfull_markdown\x18\x06 \x01(\tR\x0cfullMarkdown\x12\x16\n\x06source\x18\x07 \x01(\tR\x06source"<\n\x0eSuggestRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x14\n\x05limit\x18\x02 \x01(\x05R\x05limit"I\n\x0fSuggestResponse\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12 \n\x0bsuggestions\x18\x02 \x03(\tR\x0bsuggestions"*\n\x12GetTrendingRequest\x12\x14\n\x05limit\x18\x01 \x01(\x05R\x05limit"9\n\rTrendingTopic\x12\x14\n\x05topic\x18\x01 \x01(\tR\x05topic\x12\x12\n\x04hits\x18\x02 \x01(\x03R\x04hits"L\n\x13GetTrendingResponse\x125\n\x08trending\x18\x01 \x03(\x0b2\x19.neutron.v1.TrendingTopicR\x08trending"\x11\n\x0fGetStatsRequest"C\n\x10GetStatsResponse\x12/\n\x05stats\x18\x01 \x01(\x0b2\x19.neutron.v1.StatsSnapshotR\x05stats"-\n\x15RecordHotTopicRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query"(\n\x16RecordHotTopicResponse\x12\x0e\n\x02ok\x18\x01 \x01(\x08R\x02ok"\xa9\x01\n\x17DiscoverAndCrawlRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x1b\n\tmax_pages\x18\x02 \x01(\x05R\x08maxPages\x12\x12\n\x04mode\x18\x03 \x01(\tR\x04mode\x12\x1b\n\tskip_urls\x18\x04 \x03(\tR\x08skipUrls\x12*\n\x11include_full_text\x18\x05 \x01(\x08R\x0fincludeFullText"\x8b\x01\n\x18DiscoverAndCrawlResponse\x128\n\tdocuments\x18\x01 \x03(\x0b2\x1a.neutron.v1.SearchDocumentR\tdocuments\x125\n\x07metrics\x18\x02 \x03(\x0b2\x1b.neutron.v1.DiscoveryMetricR\x07metrics"[\n\x14DiscoverSeedsRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x19\n\x08max_urls\x18\x02 \x01(\x05R\x07maxUrls\x12\x12\n\x04mode\x18\x03 \x01(\tR\x04mode"b\n\x15DiscoverSeedsResponse\x12\x12\n\x04urls\x18\x01 \x03(\tR\x04urls\x125\n\x07metrics\x18\x02 \x03(\x0b2\x1b.neutron.v1.DiscoveryMetricR\x07metrics"\xca\x01\n\x0fCrawlUrlRequest\x12\x10\n\x03url\x18\x01 \x01(\tR\x03url\x12\x14\n\x05query\x18\x02 \x01(\tR\x05query\x12\x1b\n\tfast_live\x18\x03 \x01(\x08R\x08fastLive\x12*\n\x11include_full_text\x18\x04 \x01(\x08R\x0fincludeFullText\x12!\n\x0ccheck_robots\x18\x05 \x01(\x08R\x0bcheckRobots\x12#\n\rforce_refresh\x18\x06 \x01(\x08R\x0cforceRefresh"F\n\x10CrawlUrlResponse\x122\n\x07outcome\x18\x01 \x01(\x0b2\x18.neutron.v1.CrawlOutcomeR\x07outcome"\xc9\x01\n\x12StreamCrawlRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x1b\n\tmax_pages\x18\x02 \x01(\x05R\x08maxPages\x12\x12\n\x04mode\x18\x03 \x01(\tR\x04mode\x12\x1b\n\tskip_urls\x18\x04 \x03(\tR\x08skipUrls\x12*\n\x11include_full_text\x18\x05 \x01(\x08R\x0fincludeFullText\x12#\n\rforce_refresh\x18\x06 \x01(\x08R\x0cforceRefresh"\xde\x01\n\x10CrawlStreamEvent\x12\x1d\n\nevent_type\x18\x01 \x01(\tR\teventType\x123\n\x06metric\x18\x02 \x01(\x0b2\x1b.neutron.v1.DiscoveryMetricR\x06metric\x122\n\x07outcome\x18\x03 \x01(\x0b2\x18.neutron.v1.CrawlOutcomeR\x07outcome\x12\x10\n\x03url\x18\x04 \x01(\tR\x03url\x12\x16\n\x06domain\x18\x05 \x01(\tR\x06domain\x12\x18\n\x07message\x18\x06 \x01(\tR\x07message"\x9b\x01\n\x14GatewaySearchRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x14\n\x05limit\x18\x02 \x01(\x05R\x05limit\x12\x12\n\x04mode\x18\x03 \x01(\tR\x04mode\x12)\n\x10include_markdown\x18\x04 \x01(\x08R\x0fincludeMarkdown\x12\x18\n\x07refresh\x18\x05 \x01(\x08R\x07refresh"\xf8\x01\n\x15GatewaySearchResponse\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x12\n\x04mode\x18\x02 \x01(\tR\x04mode\x12\x16\n\x06source\x18\x03 \x01(\tR\x06source\x12\x14\n\x05total\x18\x04 \x01(\x05R\x05total\x122\n\x06answer\x18\x05 \x01(\x0b2\x1a.neutron.v1.GroundedAnswerR\x06answer\x12\x1d\n\nhas_answer\x18\x06 \x01(\x08R\thasAnswer\x124\n\x07results\x18\x07 \x03(\x0b2\x1a.neutron.v1.SearchDocumentR\x07results2\xbf\x04\n\rSearchService\x12K\n\nQueryIndex\x12\x1d.neutron.v1.QueryIndexRequest\x1a\x1e.neutron.v1.QueryIndexResponse\x12]\n\x10SynthesizeAnswer\x12#.neutron.v1.SynthesizeAnswerRequest\x1a$.neutron.v1.SynthesizeAnswerResponse\x12N\n\x0bGetDocument\x12\x1e.neutron.v1.GetDocumentRequest\x1a\x1f.neutron.v1.GetDocumentResponse\x12B\n\x07Suggest\x12\x1a.neutron.v1.SuggestRequest\x1a\x1b.neutron.v1.SuggestResponse\x12N\n\x0bGetTrending\x12\x1e.neutron.v1.GetTrendingRequest\x1a\x1f.neutron.v1.GetTrendingResponse\x12E\n\x08GetStats\x12\x1b.neutron.v1.GetStatsRequest\x1a\x1c.neutron.v1.GetStatsResponse\x12W\n\x0eRecordHotTopic\x12!.neutron.v1.RecordHotTopicRequest\x1a".neutron.v1.RecordHotTopicResponse2\xdb\x02\n\x0eCrawlerService\x12]\n\x10DiscoverAndCrawl\x12#.neutron.v1.DiscoverAndCrawlRequest\x1a$.neutron.v1.DiscoverAndCrawlResponse\x12T\n\rDiscoverSeeds\x12 .neutron.v1.DiscoverSeedsRequest\x1a!.neutron.v1.DiscoverSeedsResponse\x12E\n\x08CrawlUrl\x12\x1b.neutron.v1.CrawlUrlRequest\x1a\x1c.neutron.v1.CrawlUrlResponse\x12M\n\x0bStreamCrawl\x12\x1e.neutron.v1.StreamCrawlRequest\x1a\x1c.neutron.v1.CrawlStreamEvent0\x012\xba\x02\n\x0eGatewayService\x12M\n\x06Search\x12 .neutron.v1.GatewaySearchRequest\x1a!.neutron.v1.GatewaySearchResponse\x12B\n\x07Suggest\x12\x1a.neutron.v1.SuggestRequest\x1a\x1b.neutron.v1.SuggestResponse\x12E\n\x08GetStats\x12\x1b.neutron.v1.GetStatsRequest\x1a\x1c.neutron.v1.GetStatsResponse\x12N\n\x0bGetDocument\x12\x1e.neutron.v1.GetDocumentRequest\x1a\x1f.neutron.v1.GetDocumentResponseb\x06proto3',
     [],
     {
         "Citation": Citation,
@@ -1248,6 +1382,8 @@ _DESC = file_desc(
         "DiscoverSeedsResponse": DiscoverSeedsResponse,
         "CrawlUrlRequest": CrawlUrlRequest,
         "CrawlUrlResponse": CrawlUrlResponse,
+        "StreamCrawlRequest": StreamCrawlRequest,
+        "CrawlStreamEvent": CrawlStreamEvent,
         "GatewaySearchRequest": GatewaySearchRequest,
         "GatewaySearchResponse": GatewaySearchResponse,
     },

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import hmac
-from typing import Any, Awaitable, Callable, Dict, Iterable, Optional, Tuple, TypeVar
+from typing import Any, Dict, Iterable, Optional, Tuple, TypeVar
 
 from connectrpc.code import Code
 from connectrpc.errors import ConnectError
-from connectrpc.interceptor import UnaryInterceptor
+from connectrpc.interceptor import MetadataInterceptor
 from connectrpc.protocol import ProtocolType
 from connectrpc.request import RequestContext
 from fastapi import FastAPI
@@ -61,27 +61,21 @@ def configure_cors(app: FastAPI, origins: Iterable[str]) -> None:
     )
 
 
-class InternalAuthInterceptor(UnaryInterceptor):
-    """Enforce Bearer / x-internal-key shared secret verification on internal RPCs."""
+class InternalAuthInterceptor(MetadataInterceptor[None]):
+    """Enforce Bearer / x-internal-key verification across unary and streaming RPCs."""
 
     def __init__(self, expected_key: str, *, require_key: bool = False) -> None:
         self._expected_key = (expected_key or "").strip()
         self._require_key = require_key
 
-    async def intercept_unary(
-        self,
-        call_next: Callable[[REQ, RequestContext], Awaitable[RES]],
-        request: REQ,
-        ctx: RequestContext,
-        /,
-    ) -> RES:
+    async def on_start(self, ctx: RequestContext) -> None:
         if not self._expected_key:
             if self._require_key:
                 raise ConnectError(
                     Code.UNAVAILABLE,
                     "Internal RPC authentication key is not configured.",
                 )
-            return await call_next(request, ctx)
+            return None
 
         auth_header = ctx.request_headers.get("authorization") or ""
         alt_header = ctx.request_headers.get("x-internal-key") or ""
@@ -95,8 +89,16 @@ class InternalAuthInterceptor(UnaryInterceptor):
             raise ConnectError(Code.UNAUTHENTICATED, "Missing internal authorization header")
         if not hmac.compare_digest(token.encode("utf-8"), self._expected_key.encode("utf-8")):
             raise ConnectError(Code.PERMISSION_DENIED, "Invalid internal API key")
+        return None
 
-        return await call_next(request, ctx)
+    async def on_end(
+        self,
+        token: None,
+        ctx: RequestContext,
+        error: Exception | None,
+        /,
+    ) -> None:
+        return None
 
 
 def resolve_protocol(name: str) -> ProtocolType:
@@ -109,12 +111,18 @@ def resolve_protocol(name: str) -> ProtocolType:
     return ProtocolType.CONNECT
 
 
-def internal_auth_headers(api_key: str) -> Dict[str, str]:
-    """Build internal authorization headers if a shared key is configured."""
+def internal_auth_headers(
+    api_key: str, *, request_id: Optional[str] = None
+) -> Dict[str, str]:
+    """Build internal authorization and request-tracing headers for downstream RPCs."""
+    headers: Dict[str, str] = {}
     cleaned = (api_key or "").strip()
-    if not cleaned:
-        return {}
-    return {"Authorization": f"Bearer {cleaned}"}
+    if cleaned:
+        headers["Authorization"] = f"Bearer {cleaned}"
+    clean_req_id = (request_id or "").strip()
+    if clean_req_id:
+        headers["x-request-id"] = clean_req_id
+    return headers
 
 
 def doc_to_proto(
@@ -174,6 +182,7 @@ def answer_to_proto(
         neutron_pb.GroundedAnswer(
             summary=str(answer["summary"]),
             citations=citations,
+            mode=str(answer.get("mode") or "extractive_grounded"),
         ),
         True,
     )
@@ -197,6 +206,6 @@ def proto_to_answer(
             }
             for c in msg.citations
         ],
-        "mode": "extractive_grounded",
+        "mode": str(msg.mode or "extractive_grounded"),
     }
 
