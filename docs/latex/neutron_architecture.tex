@@ -1,18 +1,25 @@
-\documentclass[11pt,a4paper]{article}
+\documentclass[10pt,a4paper]{article}
 
 % ------------------------------------------------------------------------------
-% Packages & Typography
+% Typography & Reading Comfort (XeLaTeX + Native OpenType/TrueType Fonts)
 % ------------------------------------------------------------------------------
-\usepackage[T1]{fontenc}
-\usepackage[utf8]{inputenc}
-\usepackage[scaled=0.95]{helvet}
-\renewcommand{\familydefault}{\sfdefault}
-\usepackage{courier}
-\usepackage[margin=0.72in,top=0.82in,bottom=0.82in,headheight=22pt]{geometry}
+\usepackage{fontspec}
+\setmainfont{Source Sans 3}[
+    UprightFont = *,
+    BoldFont = * Bold,
+    ItalicFont = * Italic,
+    Scale = 1.0
+]
+\setmonofont{Roboto Mono}[Scale=0.86]
+\usepackage{microtype}
+\usepackage{setspace}
+\setstretch{1.20}
+
+\usepackage[margin=0.82in,top=0.92in,bottom=0.88in,headheight=20pt]{geometry}
 \usepackage{xcolor}
 \usepackage{graphicx}
 \usepackage{tikz}
-\usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit,backgrounds,calc,shadows.blur}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit,backgrounds,calc}
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.18}
 \usepackage[most]{tcolorbox}
@@ -22,515 +29,408 @@
 \usepackage{enumitem}
 \usepackage{fancyhdr}
 \usepackage{titlesec}
-\usepackage{listings}
 \usepackage{xurl}
 \usepackage{hyperref}
 \usepackage{float}
 
 % ------------------------------------------------------------------------------
-% Professional Color Grading Palette (Obsidian, Slate, Cyan, Indigo, Emerald)
+% Restrained Editorial Color Palette (Paper White, Charcoal Ink, Navy & Teal)
 % ------------------------------------------------------------------------------
-\definecolor{Obsidian}{HTML}{070B14}
-\definecolor{DeepNavy}{HTML}{0F172A}
-\definecolor{SlateDark}{HTML}{1E293B}
-\definecolor{BodyText}{HTML}{334155}
-\definecolor{MutedText}{HTML}{64748B}
-\definecolor{SurfaceBg}{HTML}{F8FAFC}
-\definecolor{CardBorder}{HTML}{CBD5E1}
-\definecolor{RuleGray}{HTML}{E2E8F0}
-
-\definecolor{EdgeBlue}{HTML}{2563EB}
-\definecolor{EdgeBlueBg}{HTML}{EFF6FF}
-\definecolor{GatewayIndigo}{HTML}{4F46E5}
-\definecolor{GatewayIndigoBg}{HTML}{EEF2FF}
-\definecolor{SearchCyan}{HTML}{0891B2}
-\definecolor{SearchCyanBg}{HTML}{ECFEFF}
-\definecolor{CrawlEmerald}{HTML}{059669}
-\definecolor{CrawlEmeraldBg}{HTML}{ECFDF5}
-\definecolor{StorageAmber}{HTML}{D97706}
-\definecolor{StorageAmberBg}{HTML}{FFFBEB}
-\definecolor{SecurityRose}{HTML}{E11D48}
-\definecolor{SecurityRoseBg}{HTML}{FFF1F2}
+\definecolor{HeadingInk}{HTML}{111827}
+\definecolor{BodyInk}{HTML}{374151}
+\definecolor{MutedInk}{HTML}{6B7280}
+\definecolor{NavyPrimary}{HTML}{1E3A5F}
+\definecolor{TealAccent}{HTML}{0F766E}
+\definecolor{AmberNote}{HTML}{92400E}
+\definecolor{SurfaceTint}{HTML}{F8FAFC}
+\definecolor{NavyTint}{HTML}{F1F5F9}
+\definecolor{TealTint}{HTML}{F0FDFA}
+\definecolor{BorderGray}{HTML}{CBD5E1}
+\definecolor{LightRule}{HTML}{E5E7EB}
 
 \hypersetup{
     colorlinks=true,
-    linkcolor=GatewayIndigo,
-    urlcolor=EdgeBlue,
-    pdftitle={Neutron v3.0 - Distributed Search, Streaming Crawler \& Cloud Architecture},
-    pdfauthor={Fahim Sarker}
+    linkcolor=NavyPrimary,
+    urlcolor=NavyPrimary,
+    pdftitle={Neutron v3.0 - System Architecture and Technical Specification},
+    pdfauthor={Md Fahim Sarker}
 }
 
 % ------------------------------------------------------------------------------
-% Section & Header/Footer Styling
+% Page Headers, Footers & Section Styling
 % ------------------------------------------------------------------------------
 \pagestyle{fancy}
 \fancyhf{}
-\renewcommand{\headrulewidth}{0.5pt}
-\renewcommand{\headrule}{\hbox to\headwidth{\color{RuleGray}\leaders\hrule height \headrulewidth\hfill}}
-\renewcommand{\footrulewidth}{0.5pt}
-\renewcommand{\footrule}{\hbox to\headwidth{\color{RuleGray}\leaders\hrule height \footrulewidth\hfill}}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{LightRule}\leaders\hrule height \headrulewidth\hfill}}
+\renewcommand{\footrulewidth}{0.4pt}
+\renewcommand{\footrule}{\hbox to\headwidth{\color{LightRule}\leaders\hrule height \footrulewidth\hfill}}
 
-\fancyhead[L]{\fontsize{8}{10}\selectfont\color{MutedText}\textbf{NEUTRON v3.0}\quad|\quad Architecture \& System Design Specification}
-\fancyhead[R]{\fontsize{8}{10}\selectfont\color{SearchCyan}\textbf{Production Engineering Whitepaper}}
-\fancyfoot[L]{\fontsize{8}{10}\selectfont\color{MutedText}github.com/fahiiim/Neutron-Web-Crawler}
-\fancyfoot[R]{\fontsize{8}{10}\selectfont\color{DeepNavy}\textbf{Page \thepage}}
+\fancyhead[L]{\fontsize{8}{10}\selectfont\color{MutedInk}Neutron v3.0 \textemdash{} System Architecture Specification}
+\fancyhead[R]{\fontsize{8}{10}\selectfont\color{MutedInk}Technical Reference}
+\fancyfoot[L]{\fontsize{8}{10}\selectfont\color{MutedInk}github.com/fahiiim/Neutron-Web-Crawler}
+\fancyfoot[R]{\fontsize{8}{10}\selectfont\color{HeadingInk}\thepage}
 
 \titleformat{\section}
-  {\Large\bfseries\color{DeepNavy}}
-  {\colorbox{DeepNavy}{\color{white}\fontsize{10}{12}\selectfont\bfseries\,\thesection\,}}
-  {0.65em}
+  {\Large\bfseries\color{HeadingInk}}
+  {\color{NavyPrimary}\thesection.}
+  {0.6em}
   {}
-  [\vspace{3pt}{\color{SearchCyan}\titlerule[1.2pt]}]
+  [\vspace{3pt}{\color{LightRule}\titlerule[0.8pt]}]
 
 \titleformat{\subsection}
-  {\large\bfseries\color{SlateDark}}
-  {\color{GatewayIndigo}\thesubsection}
+  {\large\bfseries\color{NavyPrimary}}
+  {\thesubsection}
   {0.55em}
   {}
 
 \titleformat{\subsubsection}
-  {\normalsize\bfseries\color{SearchCyan}}
+  {\normalsize\bfseries\color{HeadingInk}}
   {\thesubsubsection}
   {0.5em}
   {}
 
-\setlength{\parskip}{0.48em}
+\setlength{\parskip}{0.55em}
 \setlength{\parindent}{0pt}
 
-% ------------------------------------------------------------------------------
-% Custom Callouts & Code Listing Styling
-% ------------------------------------------------------------------------------
-\newtcolorbox{archcallout}[3][]{
+% Subtle left-accent editorial note box (minimalist, zero drop shadow)
+\newtcolorbox{designnote}[1][]{
     enhanced,
-    colback=#2,
-    colframe=#3,
-    coltitle=white,
-    fonttitle=\bfseries\small,
-    title=#1,
-    boxrule=0.8pt,
-    arc=4pt,
-    left=9pt, right=9pt, top=7pt, bottom=7pt,
-    breakable
+    breakable,
+    colback=SurfaceTint,
+    colframe=SurfaceTint,
+    borderline west={2.2pt}{0pt}{NavyPrimary},
+    boxrule=0pt,
+    arc=0pt,
+    left=10pt, right=10pt, top=7pt, bottom=7pt,
+    before upper={\ifstrempty{#1}{}{\textbf{\color{NavyPrimary}#1}\par\vspace{2pt}}}
 }
 
-\newtcolorbox{metriccard}[2]{
-    enhanced,
-    colback=SurfaceBg,
-    colframe=CardBorder,
-    boxrule=0.7pt,
-    arc=4pt,
-    top=6pt, bottom=6pt, left=8pt, right=8pt,
-    borderline north={2.5pt}{0pt}{#1},
-    title={\fontsize{8}{10}\selectfont\color{MutedText}\textbf{#2}},
-    colbacktitle=SurfaceBg,
-    coltitle=MutedText,
-    attach title to upper={\par\vspace{2pt}}
-}
-
-\lstdefinestyle{neutroncode}{
-    backgroundcolor=\color{Obsidian},
-    basicstyle=\ttfamily\footnotesize\color{white},
-    keywordstyle=\color{SearchCyan}\bfseries,
-    stringstyle=\color{CrawlEmerald},
-    commentstyle=\color{MutedText}\itshape,
-    breaklines=true,
-    frame=single,
-    rulecolor=\color{SlateDark},
-    xleftmargin=6pt,
-    xrightmargin=6pt,
-    aboveskip=6pt,
-    belowskip=6pt
-}
-
-\newcommand{\logoicon}[2][16pt]{\includegraphics[height=#1]{assets/logos/#2.png}}
+\newcommand{\logoicon}[2][15pt]{\includegraphics[height=#1]{assets/logos/#2.png}}
 
 % ------------------------------------------------------------------------------
-% Document Begin
+% Document Body
 % ------------------------------------------------------------------------------
 \begin{document}
-\color{BodyText}
+\color{BodyInk}
 \sloppy
 
 % ==============================================================================
-% COVER PAGE (Obsidian Dark Executive Cover with Pulsar Orbital Geometry)
+% CLEAN EDITORIAL COVER PAGE (Light Paper, Structured Metadata, Subtle Accents)
 % ==============================================================================
 \begin{titlepage}
 \thispagestyle{empty}
 \begin{tikzpicture}[remember picture, overlay]
-    % Obsidian gradient background
-    \fill[Obsidian] (current page.south west) rectangle (current page.north east);
-    \shade[left color=Obsidian, right color=DeepNavy]
-        (current page.south west) rectangle (current page.north east);
-
-    % Geometric pulsar orbit accents (top-right)
-    \begin{scope}[shift={($(current page.north east)+(-2.2cm,-3.8cm)$)}]
-        \draw[SearchCyan, opacity=0.14, line width=1.2pt] (0,0) circle (2.2cm);
-        \draw[GatewayIndigo, opacity=0.22, line width=1pt, dashed] (0,0) circle (3.6cm);
-        \draw[CrawlEmerald, opacity=0.12, line width=0.9pt] (0,0) circle (5.1cm);
-        \fill[SearchCyan, opacity=0.85] (0,0) circle (4pt);
-        \fill[GatewayIndigo, opacity=0.9] (135:3.6cm) circle (3.2pt);
-        \fill[CrawlEmerald, opacity=0.85] (220:5.1cm) circle (2.8pt);
-    \end{scope}
-
-    % Left vertical color bar
-    \fill[SearchCyan] (current page.south west) rectangle ($(current page.north west)+(0.28cm,0)$);
-    \fill[GatewayIndigo] ($(current page.south west)+(0.28cm,0)$) rectangle ($(current page.north west)+(0.42cm,0)$);
-
-    % Subtle bottom grid rule
-    \draw[SlateDark, line width=0.8pt] ($(current page.south west)+(1.4cm,2.65cm)$) -- ($(current page.south east)+(-1.2cm,2.65cm)$);
+    \fill[NavyPrimary] (current page.north west) rectangle ($(current page.north east)+(0,-0.22cm)$);
+    \fill[TealAccent] ($(current page.north west)+(0,-0.22cm)$) rectangle ($(current page.north east)+(0,-0.30cm)$);
 \end{tikzpicture}
 
-\vspace*{1.1cm}
-{\color{SearchCyan}\fontsize{10}{12}\selectfont\bfseries DISTRIBUTED SYSTEMS \& SEARCH ARCHITECTURE WHITEPAPER}\\[0.55cm]
-{\color{white}\fontsize{34}{40}\selectfont\bfseries NEUTRON v3.0}\\[0.25cm]
-{\color{RuleGray}\fontsize{16}{22}\selectfont Distributed Web Search Engine, Server-Streaming JIT Crawler,\\and Grounded Cited Research Platform}
+\vspace*{0.4cm}
+{\fontsize{9.5}{12}\selectfont\bfseries\color{TealAccent} SYSTEM DESIGN \& ARCHITECTURE SPECIFICATION}
 
-\vspace{0.9cm}
-\begin{tcolorbox}[
-    enhanced,
-    colback=DeepNavy,
-    colframe=SearchCyan!60!DeepNavy,
-    boxrule=0.9pt,
-    arc=5pt,
-    left=14pt, right=14pt, top=12pt, bottom=12pt
-]
-\color{RuleGray}\small
-\textbf{Architectural Thesis:} Neutron demonstrates how a production-grade, zero-telemetry search engine with sub-50\,ms indexed retrieval, live Chrome-impersonated web acquisition, server-streaming progress telemetry, and optional LLM citation synthesis can operate cohesively across decoupled edge and ConnectRPC microservices within a \textbf{\$0/month serverless cloud budget}.
-\end{tcolorbox}
+\vspace{0.2cm}
+{\fontsize{28}{33}\selectfont\bfseries\color{HeadingInk} Neutron Search Engine\\\& Distributed Web Crawler}
 
-\vspace{0.9cm}
-\noindent
-\begin{minipage}[t]{0.23\textwidth}
-\begin{tcolorbox}[enhanced, colback=SlateDark, colframe=EdgeBlue, boxrule=0.8pt, arc=4pt, left=8pt, right=8pt, top=8pt, bottom=8pt, height=2.25cm, valign=top]
-{\color{EdgeBlue!70!white}\scriptsize\textbf{CLOUD FOOTPRINT}}\\[3pt]
-{\color{white}\Large\bfseries \$0 / mo}\\[2pt]
-{\color{MutedText}\tiny Render Free + GitHub + Turso}
-\end{tcolorbox}
-\end{minipage}\hfill
-\begin{minipage}[t]{0.23\textwidth}
-\begin{tcolorbox}[enhanced, colback=SlateDark, colframe=GatewayIndigo, boxrule=0.8pt, arc=4pt, left=8pt, right=8pt, top=8pt, bottom=8pt, height=2.25cm, valign=top]
-{\color{GatewayIndigo!65!white}\scriptsize\textbf{RPC TOPOLOGY}}\\[3pt]
-{\color{white}\Large\bfseries 3 Services}\\[2pt]
-{\color{MutedText}\tiny ConnectRPC / Protobuf (\texttt{proto3})}
-\end{tcolorbox}
-\end{minipage}\hfill
-\begin{minipage}[t]{0.23\textwidth}
-\begin{tcolorbox}[enhanced, colback=SlateDark, colframe=SearchCyan, boxrule=0.8pt, arc=4pt, left=8pt, right=8pt, top=8pt, bottom=8pt, height=2.25cm, valign=top]
-{\color{SearchCyan!75!white}\scriptsize\textbf{RETRIEVAL ENGINE}}\\[3pt]
-{\color{white}\Large\bfseries FTS5 + JIT}\\[2pt]
-{\color{MutedText}\tiny Porter BM25 + 6 Live Adapters}
-\end{tcolorbox}
-\end{minipage}\hfill
-\begin{minipage}[t]{0.23\textwidth}
-\begin{tcolorbox}[enhanced, colback=SlateDark, colframe=CrawlEmerald, boxrule=0.8pt, arc=4pt, left=8pt, right=8pt, top=8pt, bottom=8pt, height=2.25cm, valign=top]
-{\color{CrawlEmerald!75!white}\scriptsize\textbf{PRIVACY MODEL}}\\[3pt]
-{\color{white}\Large\bfseries Zero Logs}\\[2pt]
-{\color{MutedText}\tiny No Cookies, No IP Persistence}
-\end{tcolorbox}
-\end{minipage}
+\vspace{0.25cm}
+{\fontsize{12.5}{17}\selectfont\color{MutedInk} Version 3.0 \textemdash{} High-Level Design, Low-Level Internals, and Cloud Infrastructure}
 
-\vspace{1.05cm}
-{\color{SearchCyan!80!white}\fontsize{9}{11}\selectfont\bfseries PRODUCTION TECHNOLOGY STACK}\\[0.35cm]
-\begin{tcolorbox}[
-    enhanced,
-    colback=SlateDark!90!Obsidian,
-    colframe=SlateDark,
-    boxrule=0.7pt,
-    arc=5pt,
-    left=12pt, right=12pt, top=10pt, bottom=10pt
-]
+\vspace{0.45cm}
+\noindent\rule{\textwidth}{0.6pt}
+\vspace{0.3cm}
+
+\textbf{\color{HeadingInk}Abstract}\\[0.2em]
+Neutron is a privacy-focused web search engine, on-demand crawler, and citation synthesis system structured around three decoupled Python microservices communicating over ConnectRPC/Protobuf, a serverless Turso (LibSQL) FTS5 index, and a static React web client. This specification documents the deployed v3.0 architecture across GitHub Pages and Render Free instances, detailing request routing, hybrid cache-first and server-streaming crawl execution, lexical query normalization and ranking, HTML extraction, bounded deduplication, and storage modeling.
+
+\vspace{0.35cm}
+\renewcommand{\arraystretch}{1.28}
+\noindent\begin{tabular}{@{}p{3.6cm} l@{}}
+\toprule
+\multicolumn{2}{@{}l}{\textbf{\color{HeadingInk}Document Metadata}} \\
+\midrule
+\textcolor{MutedInk}{Author} & Md Fahim Sarker \\
+\textcolor{MutedInk}{System Release} & Neutron v3.0 (\texttt{main}) \\
+\textcolor{MutedInk}{Runtime} & Python 3.12.8 (FastAPI, ConnectRPC) / React 18 (TypeScript, Vite) \\
+\textcolor{MutedInk}{Primary Storage} & Turso LibSQL (SQLite FTS5 + Zstandard level-3 BLOBs) \\
+\textcolor{MutedInk}{Hosting Platforms} & GitHub Pages (Frontend) · Render Free, Oregon (3 Web Services) \\
+\textcolor{MutedInk}{Source Repository} & \url{https://github.com/fahiiim/Neutron-Web-Crawler} \\
+\textcolor{MutedInk}{Public Gateway} & \url{https://neutron-gateway.onrender.com} \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.45cm}
+\textbf{\color{HeadingInk}Core Technology Stack}
+\vspace{0.3em}
+
+\begin{tcolorbox}[enhanced, colback=SurfaceTint, colframe=LightRule, boxrule=0.6pt, arc=3pt, left=10pt, right=10pt, top=8pt, bottom=8pt]
 \centering
-\renewcommand{\arraystretch}{1.45}
+\renewcommand{\arraystretch}{1.3}
 \begin{tabular}{cccccc}
-\logoicon[20pt]{react} & \logoicon[20pt]{typescript} & \logoicon[20pt]{vite} & \logoicon[20pt]{tailwindcss} & \logoicon[20pt]{fastapi} & \logoicon[20pt]{python} \\
-{\color{RuleGray}\scriptsize React 18} & {\color{RuleGray}\scriptsize TypeScript} & {\color{RuleGray}\scriptsize Vite 6} & {\color{RuleGray}\scriptsize Tailwind v4} & {\color{RuleGray}\scriptsize FastAPI} & {\color{RuleGray}\scriptsize Python 3.12} \\[6pt]
-\logoicon[20pt]{connectrpc} & \logoicon[20pt]{turso} & \logoicon[20pt]{sqlite} & \logoicon[20pt]{render_dark} & \logoicon[20pt]{github_light} & \logoicon[20pt]{gemini} \\
-{\color{RuleGray}\scriptsize ConnectRPC} & {\color{RuleGray}\scriptsize Turso LibSQL} & {\color{RuleGray}\scriptsize SQLite FTS5} & {\color{RuleGray}\scriptsize Render Free} & {\color{RuleGray}\scriptsize GitHub Pages} & {\color{RuleGray}\scriptsize Gemini 2.5} \\
+\logoicon[18pt]{react} & \logoicon[18pt]{typescript} & \logoicon[18pt]{vite} & \logoicon[18pt]{tailwindcss} & \logoicon[18pt]{fastapi} & \logoicon[18pt]{python} \\
+{\scriptsize React 18} & {\scriptsize TypeScript} & {\scriptsize Vite 6} & {\scriptsize Tailwind v4} & {\scriptsize FastAPI} & {\scriptsize Python 3.12} \\[4pt]
+\logoicon[18pt]{connectrpc} & \logoicon[18pt]{turso} & \logoicon[18pt]{sqlite} & \logoicon[18pt]{render} & \logoicon[18pt]{github} & \logoicon[18pt]{gemini} \\
+{\scriptsize ConnectRPC} & {\scriptsize Turso LibSQL} & {\scriptsize SQLite FTS5} & {\scriptsize Render} & {\scriptsize GitHub Pages} & {\scriptsize Gemini 2.5} \\
 \end{tabular}
 \end{tcolorbox}
 
 \vfill
-\noindent
-\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash\small\color{RuleGray}}p{10.2cm} >{\raggedleft\arraybackslash\small\color{RuleGray}}X@{}}
-\textbf{Author:} Md Fahim Sarker & \textbf{Release:} v3.0 (Main) \\
-\textbf{Repository:} \url{https://github.com/fahiiim/Neutron-Web-Crawler} & \textbf{Gateway:} \url{https://neutron-gateway.onrender.com} \\
-\end{tabularx}
+\noindent\rule{\textwidth}{0.4pt}\\[0.2em]
+{\footnotesize\color{MutedInk}Document derived strictly from verified production source files in \texttt{services/}, \texttt{spaces/crawler/}, \texttt{proto/}, \texttt{migrations/}, and \texttt{frontend/}.}
 \end{titlepage}
 
 % ==============================================================================
-% TABLE OF CONTENTS & EXECUTIVE SUMMARY
+% TABLE OF CONTENTS & SECTION 1
 % ==============================================================================
 \tableofcontents
-\vspace{0.5em}
-\hrulefill
+\vspace{0.6em}
+\noindent\rule{\textwidth}{0.5pt}
 
-\section{Executive Summary \& Engineering Design Rationale}
+\section{System Overview \& Architectural Goals}
 
-Modern web search applications typically force an uncomfortable architectural compromise: either rely on opaque third-party search APIs that monetize user telemetry, or deploy expensive stateful clusters (dedicated Elasticsearch nodes, headless browser fleets, and Redis caches) that cannot run on free-tier infrastructure.
+Search engines deployed on low-cost or serverless infrastructure face two competing constraints: full-text database lookups are fast (tens of milliseconds) but limited to previously indexed pages, whereas live multi-source web crawling yields fresh coverage at the cost of network latency, anti-bot blocking, and higher CPU/memory usage.
 
-\textbf{Neutron v3.0} solves both challenges through a three-service \textbf{ConnectRPC/Protobuf} microservice topology backed by \textbf{Turso LibSQL FTS5} (with Zstandard full-document compression) and an on-demand \textbf{Just-In-Time (JIT)} live crawler. Rather than treating every query as an expensive scrape or relying exclusively on stale batch indexes, Neutron merges \emph{cache-first sub-15\,ms FTS5 retrieval} with \emph{bounded-deadline parallel web discovery} and \emph{cited synthesis}.
-
-\begin{archcallout}[Why Neutron's Architecture Reflects Senior Systems Engineering]{SurfaceBg}{GatewayIndigo}
-\begin{enumerate}[leftmargin=1.4em, itemsep=3pt]
-    \item \textbf{True Microservice Isolation via Contract-First RPC:} Presentation (\texttt{frontend/}), edge coordination (\texttt{services/gateway}), search/synthesis (\texttt{services/search}), and outbound crawling (\texttt{services/crawler}) are isolated behind \texttt{proto/neutron/v1/neutron.proto}, communicating over HTTPS ConnectRPC (\texttt{pyqwest} + \texttt{certifi} root CAs) with constant-time \texttt{hmac.compare\_digest} Bearer validation across both unary and server-streaming RPCs.
-    \item \textbf{Designed Explicitly for \texttt{0.1\,vCPU} / \texttt{512\,MB} Cold-Start Environments:} Every bottleneck—from \texttt{12\,KB} Charikar SimHash truncation and \texttt{80}-link scan caps to \texttt{55\,s} RPC timeouts, throttled downstream \texttt{/health} warm-up pings, and \texttt{8.5\,s} bounded async JIT tasks—is tuned to prevent event-loop starvation and cold-start failures on Render Free web instances.
-    \item \textbf{Linguistically Aware Hybrid Retrieval:} Conversational questions (\emph{"what is the main purpose of..."}, \emph{"when was X established"}) are normalized, stripped of filler nouns, expanded across morphological inflections into explicit FTS5 \texttt{AND} / \texttt{70\%} quorum clauses, and re-ranked by title/URL/authoritative-domain boosts minus template boilerplate penalties.
-    \item \textbf{Zero-Telemetry Privacy by Construction:} Zero cookies, zero client IP persistence (rate limits use volatile in-memory \texttt{X-Forwarded-For} buckets), zero external icon CDNs, strict \texttt{DOMPurify} + \texttt{safeHttpUrl} sanitization in React, and signed 64-bit \texttt{url\_hash} string serialization avoiding JavaScript IEEE-754 precision loss beyond $2^{53}-1$.
-\end{enumerate}
-\end{archcallout}
-
-% ==============================================================================
-% SECTION 2: CLOUD ARCHITECTURE & PRODUCTION DEPLOYMENT TOPOLOGY
-% ==============================================================================
-\section{Cloud Architecture \& Deployment Topology}
-
-Neutron runs across three coordinated cloud planes: a static global edge UI on \textbf{GitHub Pages}, three Python 3.12.8 web services on \textbf{Render Free (Oregon)}, and an edge-replicated serverless database on \textbf{Turso LibSQL}. Figure~\ref{fig:cloud-arch} illustrates the complete network boundary, transport protocols, authentication flows, and external providers.
-
-\begin{figure}[H]
-\centering
-\resizebox{0.98\textwidth}{!}{\begin{tikzpicture}[
-    node distance=0.8cm and 0.9cm,
-    box/.style={
-        rectangle, rounded corners=5pt, draw=#1, fill=#1!7!white,
-        line width=0.9pt, inner sep=6pt, text width=3.55cm, align=center,
-        drop shadow={shadow xshift=0.5pt, shadow yshift=-1pt, opacity=0.12}
-    },
-    widebox/.style={
-        rectangle, rounded corners=5pt, draw=#1, fill=#1!7!white,
-        line width=0.9pt, inner sep=6pt, text width=4.3cm, align=center,
-        drop shadow={shadow xshift=0.5pt, shadow yshift=-1pt, opacity=0.12}
-    },
-    zone/.style={
-        rectangle, rounded corners=7pt, draw=#1, dashed, fill=#1!3!white,
-        line width=0.8pt, inner xsep=12pt, inner ysep=15pt
-    },
-    arr/.style={-{Stealth[length=2.4mm]}, line width=0.9pt, draw=SlateDark},
-    darr/.style={-{Stealth[length=2.2mm]}, dashed, line width=0.85pt, draw=GatewayIndigo}
-]
-
-% --- Edge / User Layer ---
-\node[box=EdgeBlue] (browser) {
-    \logoicon[14pt]{react}\;\logoicon[14pt]{typescript}\;\logoicon[14pt]{vite}\\[2pt]
-    \textbf{\small Browser SPA}\\[-1pt]
-    {\scriptsize React 18 · Tailwind v4 · DOMPurify\\5-min \texttt{sessionStorage} Cache}
-};
-
-\node[box=SlateDark, right=1.3cm of browser] (ghpages) {
-    \logoicon[14pt]{githubpages}\;\logoicon[14pt]{githubactions}\\[2pt]
-    \textbf{\small GitHub Pages + CI/CD}\\[-1pt]
-    {\scriptsize \texttt{deploy\_pages.yml} · \texttt{ci\_cd.yml}\\Preconnect TLS + Static Hosting}
-};
-
-% --- Gateway Layer ---
-\node[widebox=GatewayIndigo, below=1.85cm of $(browser)!0.5!(ghpages)$] (gateway) {
-    \logoicon[14pt]{render}\;\logoicon[14pt]{fastapi}\;\logoicon[14pt]{connectrpc}\\[2pt]
-    \textbf{\small Render: \texttt{neutron-gateway}}\\[-1pt]
-    {\scriptsize REST · SSE \texttt{/search/stream} · \texttt{GatewayService}\\Bounded \texttt{\_TTLCache} (300s) · \texttt{slowapi} · \texttt{X-Request-Id}}
-};
-
-% --- Internal Microservices ---
-\node[widebox=SearchCyan, below left=1.4cm and 0.4cm of gateway] (searchsvc) {
-    \logoicon[14pt]{fastapi}\;\logoicon[14pt]{python}\;\logoicon[14pt]{connectrpc}\\[2pt]
-    \textbf{\small Render: \texttt{neutron-search}}\\[-1pt]
-    {\scriptsize \texttt{SearchService} (ConnectRPC)\\Wide FTS5 Query · Re-ranking · Reader\\Gemini + Extractive Synthesis}
-};
-
-\node[widebox=CrawlEmerald, below right=1.4cm and 0.4cm of gateway] (crawlersvc) {
-    \logoicon[14pt]{fastapi}\;\logoicon[14pt]{curl}\;\logoicon[14pt]{connectrpc}\\[2pt]
-    \textbf{\small Render: \texttt{neutron-crawler}}\\[-1pt]
-    {\scriptsize \texttt{CrawlerService} (\texttt{StreamCrawl})\\6 Parallel Adapters · \texttt{curl\_cffi} Chrome124\\1M Bloom Filter · 12KB SimHash}
-};
-
-% --- Persistence & External APIs ---
-\node[widebox=StorageAmber, below=1.45cm of searchsvc] (turso) {
-    \logoicon[14pt]{turso}\;\logoicon[14pt]{sqlite}\\[2pt]
-    \textbf{\small Turso LibSQL (FTS5 + Blobs)}\\[-1pt]
-    {\scriptsize \texttt{search\_index} · \texttt{search\_fts} (Porter)\\\texttt{page\_payloads} (Zstd L3) · \texttt{hot\_topics}}
-};
-
-\node[box=GatewayIndigo, left=0.8cm of turso] (gemini) {
-    \logoicon[14pt]{gemini}\\[2pt]
-    \textbf{\small Google Gemini API}\\[-1pt]
-    {\scriptsize \texttt{gemini-2.5-flash} (Optional)\\4.5s Timeout · Cited Prose}
-};
-
-\node[widebox=CrawlEmerald, below=1.45cm of crawlersvc] (web) {
-    \logoicon[13pt]{duckduckgo}\;\logoicon[13pt]{wikipedia}\;\logoicon[13pt]{arxiv}\;\logoicon[13pt]{github}\;\logoicon[13pt]{reddit}\;\logoicon[13pt]{hackernews}\\[2pt]
-    \textbf{\small Open Web \& Discovery APIs}\\[-1pt]
-    {\scriptsize DDG · Wikipedia · arXiv · GitHub · Reddit · HN\\\texttt{robots.txt} Enforced · Domain Diversity}
-};
-
-% --- Zone Boxes ---
-\begin{scope}[on background layer]
-    \node[zone=GatewayIndigo, fit=(gateway)(searchsvc)(crawlersvc)] (renderzone) {};
-    \node[anchor=north east, font=\scriptsize\bfseries\color{GatewayIndigo}, inner sep=5pt] at (renderzone.north east) {Render Free Cluster (Oregon · Python 3.12.8)};
-\end{scope}
-
-% --- Edges ---
-\draw[darr] (ghpages) -- node[above, font=\scriptsize\color{SlateDark}] {Static Assets} (browser);
-\draw[arr] (browser.south) |- ++(0,-0.45cm) -| node[pos=0.72, right, font=\scriptsize\bfseries\color{EdgeBlue}] {HTTPS JSON / SSE} (gateway.north);
-\draw[arr, color=GatewayIndigo] (gateway.south west) -- node[left, font=\scriptsize, align=right] {ConnectRPC\\HTTPS + Bearer\\+ \texttt{X-Request-Id}} (searchsvc.north);
-\draw[arr, color=CrawlEmerald] (gateway.south east) -- node[right, font=\scriptsize, align=left] {Server-Stream\\(\texttt{StreamCrawl})\\55s Timeout} (crawlersvc.north);
-\draw[arr, color=StorageAmber] (searchsvc.south) -- node[left, font=\scriptsize] {\texttt{libsql-client}} (turso.north);
-\draw[arr, color=StorageAmber] (crawlersvc.south west) -- node[above left, font=\scriptsize] {Batch Upsert} (turso.north east);
-\draw[darr, color=GatewayIndigo] (searchsvc.west) -| node[above, near start, font=\scriptsize] {REST (Opt.)} (gemini.north);
-\draw[arr, color=CrawlEmerald] (crawlersvc.south) -- node[right, font=\scriptsize] {\texttt{httpx} + \texttt{curl\_cffi}} (web.north);
-
-\end{tikzpicture}}
-\caption{Neutron v3.0 Cloud Architecture showing actual edge, compute, storage, AI, and discovery providers.}
-\label{fig:cloud-arch}
-\end{figure}
-
-\subsection{Render Blueprint \& Cold-Start Resilience Engineering}
-Render Free services automatically spin down after 15 minutes of inactivity and cannot accept private internal-network requests across free instances. Neutron's configuration (\texttt{render.yaml} and \texttt{services/common/config.py}) handles this transparently:
-\begin{itemize}[leftmargin=1.4em, itemsep=2pt]
-    \item \textbf{Public TLS ConnectRPC Transport:} \texttt{services/gateway/app.py} configures a shared \texttt{pyqwest.HTTPTransport} loaded with \texttt{certifi} root CA certificates plus system certs, authenticating calls to \texttt{https://neutron-search.onrender.com} and \texttt{https://neutron-crawler.onrender.com} via \texttt{INTERNAL\_API\_KEY} (auto-shared via Render \texttt{fromService}).
-    \item \textbf{Dual Downstream Warm-Up (\texttt{\_maybe\_wake\_downstream}):} Requests to \texttt{/health}, \texttt{/stats}, or downstream \texttt{502}/\texttt{503} recovery paths fire throttled non-blocking \texttt{/health} pings (at most once every \texttt{180\,s}) to wake \emph{both} \texttt{neutron-search} and \texttt{neutron-crawler} concurrently before search traffic arrives.
-    \item \textbf{Graceful Cold-Start Envelopes:} \texttt{RPC\_TIMEOUT\_MS=55000} spans cold container boots (\texttt{~30-50\,s}). Early TCP/TLS handshakes are pre-warmed by \texttt{<link rel="preconnect">} in \texttt{frontend/index.html}. Custom \texttt{429} and \texttt{500} exception handlers ensure \texttt{CORSMiddleware} headers remain intact on error responses so the cross-origin GitHub Pages UI never fails opaquely.
+Neutron resolves this trade-off through an adaptive two-tier retrieval design backed by strict service separation:
+\begin{itemize}[leftmargin=1.4em, itemsep=3pt]
+    \item \textbf{Edge Separation:} Presentation assets live on GitHub Pages while public API orchestration (\texttt{services/gateway}), index query/synthesis (\texttt{services/search}), and live web crawling (\texttt{services/crawler}) run as isolated Render web services bound by Protobuf v3 contracts (\texttt{proto/neutron/v1/neutron.proto}).
+    \item \textbf{Cache-First, Stream-Second Execution:} Queries meeting \texttt{JIT\_CACHE\_THRESHOLD} (\texttt{5} indexed matches) return immediately from Turso FTS5 (or Gateway's \texttt{300\,s} \texttt{\_TTLCache}). Sparse or refreshed queries trigger \texttt{CrawlerService.StreamCrawl}, pushing real-time discovery and crawl updates to the browser over Server-Sent Events (SSE).
+    \item \textbf{Predictable Free-Tier Resource Bounds:} Shared \texttt{0.1\,vCPU} / \texttt{512\,MB} worker limits are respected through \texttt{12\,KB} SimHash truncation, an \texttt{80}-link extraction cap per document, bounded async semaphores (\texttt{MAX\_CONCURRENT\_JIT\_FETCHES = 12}), and explicit \texttt{8.5\,s} batch deadlines.
+    \item \textbf{Minimalist Data Retention:} The system sets no cookies, logs no client IP addresses to disk, validates external links via \texttt{safeHttpUrl}, and renders reader Markdown strictly through \texttt{marked} and \texttt{DOMPurify}.
 \end{itemize}
-
-% ==============================================================================
-% SECTION 3: HIGH-LEVEL DESIGN (HLD) - HYBRID SEARCH & STREAMING CASCADE
-% ==============================================================================
-\section{High-Level Design (HLD): Hybrid Cache-First \& JIT Streaming}
-
-Neutron's core architectural insight is avoiding an all-or-nothing choice between fast stale index lookups and slow live scraping. Controlled by \texttt{JIT\_CACHE\_THRESHOLD = 5}, every query flows through an adaptive multi-tier cascade (Figure~\ref{fig:hld-sequence}).
-
-\begin{figure}[H]
-\centering
-\resizebox{0.98\textwidth}{!}{\begin{tikzpicture}[
-    actor/.style={rectangle, rounded corners=3pt, draw=SlateDark, fill=#1, text width=2.75cm, align=center, font=\scriptsize\bfseries, inner sep=5pt},
-    msg/.style={-{Stealth[length=2.1mm]}, line width=0.8pt},
-    ret/.style={-{Stealth[length=2.1mm]}, dashed, line width=0.8pt},
-    note/.style={rectangle, rounded corners=3pt, draw=CardBorder, fill=SurfaceBg, font=\scriptsize, inner sep=4pt, align=left}
-]
-
-% Actors
-\node[actor=EdgeBlueBg] (u) {\logoicon[11pt]{react}\; Browser SPA};
-\node[actor=GatewayIndigoBg, right=0.65cm of u] (g) {\logoicon[11pt]{fastapi}\; Gateway};
-\node[actor=SearchCyanBg, right=0.65cm of g] (s) {\logoicon[11pt]{python}\; SearchService};
-\node[actor=CrawlEmeraldBg, right=0.65cm of s] (c) {\logoicon[11pt]{curl}\; CrawlerService};
-\node[actor=StorageAmberBg, right=0.65cm of c] (d) {\logoicon[11pt]{turso}\; Turso / Gemini};
-
-% Lifelines
-\foreach \x in {u,g,s,c,d} {
-    \draw[CardBorder, line width=0.8pt] (\x.south) -- ++(0,-10.2cm);
-}
-
-% Row coordinates helper
-\def\y{-0.75}
-\draw[msg, EdgeBlue] ($(u.south)+(0,\y)$) -- node[above, font=\scriptsize] {\texttt{GET /search/stream?q=...\&mode=all}} ($(g.south)+(0,\y)$);
-
-\node[note, anchor=west] at ($(g.south)+(0.1,-1.45)$) {Check \texttt{\_TTLCache} (300s) unless \texttt{refresh=true}; assign \texttt{X-Request-Id}};
-
-\def\y{-2.25}
-\draw[msg, GatewayIndigo] ($(g.south)+(0,\y)$) -- node[above, font=\scriptsize] {\texttt{RecordHotTopic} (async) + \texttt{QueryIndex(q, mode)}} ($(s.south)+(0,\y)$);
-\def\y{-2.85}
-\draw[msg, SearchCyan] ($(s.south)+(0,\y)$) -- node[above, font=\scriptsize] {Wide FTS5 MATCH + Zstd Hydrate + Synthesis} ($(d.south)+(0,\y)$);
-\def\y{-3.45}
-\draw[ret, SearchCyan] ($(d.south)+(0,\y)$) -- node[above, font=\scriptsize] {Ranked Docs + Citations} ($(s.south)+(0,\y)$);
-\def\y{-4.0}
-\draw[ret, GatewayIndigo] ($(s.south)+(0,\y)$) -- node[above, font=\scriptsize] {\texttt{QueryIndexResponse}} ($(g.south)+(0,\y)$);
-\def\y{-4.55}
-\draw[ret, EdgeBlue] ($(g.south)+(0,\y)$) -- node[above, font=\scriptsize] {\textbf{SSE} \texttt{cached\_results}} ($(u.south)+(0,\y)$);
-
-% Alt block
-\draw[CrawlEmerald, dashed, rounded corners=4pt, fill=CrawlEmeraldBg, fill opacity=0.35]
-    ($(u.south)+(-0.3,-4.95)$) rectangle ($(d.south)+(1.1,-8.95)$);
-\node[anchor=north west, font=\scriptsize\bfseries\color{CrawlEmerald}] at ($(u.south)+(-0.2,-5.0)$) {ALT: \texttt{refresh=true} OR \texttt{len(cached) < JIT\_CACHE\_THRESHOLD (5)}};
-
-\def\y{-5.65}
-\draw[msg, CrawlEmerald] ($(g.south)+(0,\y)$) -- node[above, font=\scriptsize] {\texttt{StreamCrawl(q, max=8, force\_refresh)}} ($(c.south)+(0,\y)$);
-\def\y{-6.3}
-\draw[ret, CrawlEmerald] ($(c.south)+(0,\y)$) -- node[above, font=\scriptsize] {Stream \texttt{discovery\_result} (6 adapters)} ($(g.south)+(0,\y)$);
-\def\y{-6.95}
-\draw[msg, CrawlEmerald] ($(c.south)+(0,\y)$) -- node[above, font=\scriptsize] {Upsert \texttt{search\_index} + \texttt{page\_payloads}} ($(d.south)+(0,\y)$);
-\def\y{-7.6}
-\draw[ret, EdgeBlue] ($(c.south)+(0,\y)$) -- node[above, font=\scriptsize] {\textbf{SSE} \texttt{crawl\_start} / \texttt{crawl\_success} / \texttt{live\_result}} ($(u.south)+(0,\y)$);
-\def\y{-8.3}
-\draw[msg, SearchCyan] ($(g.south)+(0,\y)$) -- node[above, font=\scriptsize] {\texttt{SynthesizeAnswer} (Combined Pool $\to$ Top 5)} ($(s.south)+(0,\y)$);
-\def\y{-8.75}
-\draw[ret, EdgeBlue] ($(s.south)+(0,\y)$) -- node[above, font=\scriptsize] {\textbf{SSE} \texttt{answer} (Gemini / Extractive)} ($(u.south)+(0,\y)$);
-
-\def\y{-9.55}
-\draw[ret, DeepNavy] ($(g.south)+(0,\y)$) -- node[above, font=\scriptsize] {\textbf{SSE} \texttt{done} (\texttt{timings}, \texttt{cache\_hit}, \texttt{request\_id})} ($(u.south)+(0,\y)$);
-
-\end{tikzpicture}}
-\caption{High-Level Design (HLD): Real-time SSE + ConnectRPC hybrid execution cascade.}
-\label{fig:hld-sequence}
-\end{figure}
-
-\subsection{Gateway Caching, Refresh Semantics \& Error Resilience}
-The Edge Gateway (\texttt{services/gateway/app.py}) maintains a two-instance bounded LRU+TTL cache (\texttt{\_TTLCache}): \textbf{256 entries at 300\,s TTL} for \texttt{/search}, \texttt{/api/research}, and \texttt{/search/stream} keys, plus \textbf{30\,s TTL} for connected \texttt{/stats} snapshots.
-When \texttt{?refresh=true} is requested from the UI Refresh action:
-\begin{itemize}[leftmargin=1.4em, itemsep=2pt]
-    \item Both Gateway's \texttt{\_TTLCache} and Frontend's \texttt{5}-minute \texttt{sessionStorage} cache are bypassed.
-    \item \texttt{StreamCrawl} and \texttt{DiscoverAndCrawl} receive empty \texttt{skip\_urls} so previously indexed URLs can be re-fetched cleanly.
-    \item Freshly crawled \texttt{SearchDocument} objects \textbf{replace stale cached entries in place} at matching URLs in both Gateway's merged payload and React's \texttt{live\_result} state, and trigger re-synthesis over the combined pool (\texttt{max(12, limit)} candidates) so newly crawled facts elevate to the top.
-    \item If both \texttt{SearchService} and \texttt{CrawlerService} fail (for instance, during a cold container restart), \texttt{/search/stream} emits an explicit \texttt{event: backend\_error} and triggers downstream warm-up rather than falsely reporting zero matching results.
-\end{itemize}
-
-% ==============================================================================
-% SECTION 4: LOW-LEVEL DESIGN (LLD) - PROTOBUF, RANKING, CRAWLER & SYNTHESIS
-% ==============================================================================
-\section{Low-Level Design (LLD): Internal Mechanics \& Algorithms}
-
-\subsection{Contract-First ConnectRPC, Auth Interceptor \& 64-Bit IDs}
-All internal and edge RPC contracts reside in \texttt{proto/neutron/v1/neutron.proto} and compile via \texttt{scripts/gen\_proto.py} (\texttt{protoc-gen-py} + \texttt{protoc-gen-connectrpc}) into \texttt{neutron\_rpc/neutron/v1/}.
 
 \begin{table}[H]
 \centering
 \small
 \renewcommand{\arraystretch}{1.28}
-\begin{tabularx}{\textwidth}{>{\bfseries\color{DeepNavy}}p{2.55cm} >{\ttfamily\scriptsize\raggedright\arraybackslash}p{4.9cm} >{\raggedright\arraybackslash}X}
+\begin{tabularx}{\textwidth}{@{}p{3.4cm} >{\ttfamily\scriptsize\raggedright\arraybackslash}p{4.1cm} >{\raggedright\arraybackslash}X@{}}
 \toprule
-\textbf{Service} & \textbf{RPC Methods (\texttt{proto3})} & \textbf{Low-Level Responsibility} \\
+\textbf{Service / Layer} & \textbf{Primary Entrypoint} & \textbf{Core Responsibility} \\
 \midrule
-SearchService &
-QueryIndex, SynthesizeAnswer, GetDocument, Suggest, GetTrending, GetStats, RecordHotTopic &
-FTS5 stemmed query execution, wider vertical pre-fetch (\texttt{3x} for filtered modes), Zstd payload batch read, Gemini / extractive synthesis, autocomplete \& trending. \\
-\addlinespace[3pt]
-CrawlerService &
-DiscoverSeeds, CrawlUrl, DiscoverAndCrawl, \textbf{StreamCrawl (server stream)} &
-Parallel multi-adapter URL discovery, \texttt{asyncio.Queue}-backed real-time crawl event streaming under \texttt{8.5\,s} deadline, clean task cancellation on disconnect. \\
-\addlinespace[3pt]
-GatewayService &
-Search, Suggest, GetStats, GetDocument &
-ConnectRPC/gRPC-Web mirror alongside public REST/SSE endpoints on \texttt{neutron-gateway}, propagating \texttt{X-Request-Id} and Bearer credentials. \\
+Static Web Client & frontend/src/App.tsx & Search UI, \texttt{sessionStorage} cache (5\,m), SSE event consumer, Markdown reader modal, and Architecture view. \\
+Edge Gateway & services/gateway/app.py & REST/SSE/ConnectRPC coordinator, \texttt{\_TTLCache}, \texttt{slowapi} rate limits, \texttt{X-Request-Id} propagation, and cold-start wake pings. \\
+Search Service & services/search/app.py & ConnectRPC \texttt{SearchService}: wide-pool FTS5 queries, re-ranking, Zstd payload decompression, and Gemini/extractive synthesis. \\
+Crawler Service & services/crawler/app.py & ConnectRPC \texttt{CrawlerService}: 6 parallel discovery sources, \texttt{StreamCrawl}, \texttt{robots.txt} cache, \texttt{curl\_cffi} fetch, and Bloom/SimHash dedup. \\
+Storage Engine & migrations/03\_turso\_fts5\_schema.sql & Single Turso LibSQL database storing index metadata, Porter \texttt{FTS5} triggers, Zstd BLOBs, frontier tasks, and hot topics. \\
 \bottomrule
 \end{tabularx}
-\caption{Protobuf v1 service surface compiled into \texttt{neutron\_rpc}.}
+\caption{Service responsibilities across the Neutron v3.0 codebase.}
 \end{table}
 
-\begin{archcallout}[Security Detail: Unified Unary + Streaming Auth \& JS 64-Bit Precision]{SecurityRoseBg}{SecurityRose}
-\begin{itemize}[leftmargin=1.4em, itemsep=2pt]
-    \item \textbf{Streaming-Safe \texttt{InternalAuthInterceptor} (\texttt{services/common/rpc.py}):} Implements \texttt{connectrpc.interceptor.MetadataInterceptor[None]} (\texttt{on\_start} / \texttt{on\_end}) rather than unary-only interception, enforcing constant-time \texttt{hmac.compare\_digest} checks on \texttt{Authorization: Bearer} / \texttt{x-internal-key} across both unary RPCs and server-streaming \texttt{StreamCrawl}. Hardcoded placeholder secrets are rejected at boot by Pydantic field validators.
-    \item \textbf{String-Encoded Signed 64-Bit Hashes:} \texttt{hash\_url()} and \texttt{hash\_domain()} map \texttt{xxhash.xxh64} digests to signed 64-bit SQLite integers $[{-2^{63}}, 2^{63}-1]$. Because JavaScript's \texttt{Number.MAX\_SAFE\_INTEGER} is $2^{53}-1$, Protobuf and JSON schemas transmit \texttt{url\_hash} strictly as decimal strings to prevent reader lookup corruption.
-\end{itemize}
-\end{archcallout}
+% ==============================================================================
+% SECTION 2: CLOUD ARCHITECTURE
+% ==============================================================================
+\clearpage
+\section{Cloud Architecture \& Network Topology}
 
-\subsection{Query Normalization, Stemmed Quorum FTS5 \& Concept Re-Ranking}
-Natural-language questions severely degrade literal full-text recall if passed raw into SQLite FTS5. Figure~\ref{fig:lld-ranking} details Neutron's multi-stage lexical \& semantic scoring pipeline (\texttt{spaces/crawler/db\_turso.py} and \texttt{synthesis.py}).
+Figure~\ref{fig:cloud-arch} shows the production deployment layout across GitHub, Render (Oregon), Turso, Google Gemini, and external web sources. Because Render Free web services do not expose private mesh networking across separate free instances, \texttt{neutron-gateway} communicates with \texttt{neutron-search} and \texttt{neutron-crawler} over public HTTPS using \texttt{pyqwest.HTTPTransport} configured with \texttt{certifi} root certificates and shared Bearer authentication (\texttt{INTERNAL\_API\_KEY}).
 
 \begin{figure}[H]
 \centering
-\resizebox{0.98\textwidth}{!}{\begin{tikzpicture}[
-    node distance=0.45cm and 0.45cm,
-    stepbox/.style={
-        rectangle, rounded corners=4pt, draw=#1, fill=#1!8!white,
-        line width=0.8pt, text width=3.1cm, align=center, font=\scriptsize, inner sep=5pt
+\resizebox{0.97\textwidth}{!}{\begin{tikzpicture}[
+    node distance=1.1cm and 1.1cm,
+    cnode/.style={
+        rectangle, rounded corners=3pt, draw=#1, fill=white,
+        line width=0.75pt, inner sep=7pt, text width=3.9cm, align=center
     },
-    arr/.style={-{Stealth[length=2mm]}, line width=0.85pt, draw=SlateDark}
+    zone/.style={
+        rectangle, rounded corners=4pt, draw=BorderGray, dashed, fill=SurfaceTint,
+        line width=0.7pt, inner xsep=14pt, inner ysep=16pt
+    },
+    arr/.style={-{Stealth[length=2.2mm]}, line width=0.8pt, draw=NavyPrimary},
+    darr/.style={-{Stealth[length=2.1mm]}, dashed, line width=0.75pt, draw=MutedInk}
 ]
-\node[stepbox=EdgeBlue] (s1) {\textbf{1. Framing Strip}\\[2pt]\texttt{normalize\_search\_query}\\Strips \textit{what/who/when/\\where/how/why} prefixes};
-\node[stepbox=GatewayIndigo, right=of s1] (s2) {\textbf{2. Sanitize \& Filter}\\[2pt]\texttt{sanitize\_fts\_terms}\\Drops FTS ops, stopwords,\\filler (\textit{purpose, main}); cap 8};
-\node[stepbox=SearchCyan, right=of s2] (s3) {\textbf{3. Inflect \& Group}\\[2pt]\texttt{\_expand\_term\_variants}\\(\texttt{"joining" OR "join"}\\OR \texttt{"joins" OR "joined"})};
-\node[stepbox=StorageAmber, right=of s3] (s4) {\textbf{4. Explicit AND + Quorum}\\[2pt]FTS5 \texttt{BM25(4.0, 1.5, 0.5)}\\Fallback: $\ge 70\%$ terms\\(min 3) if $\ge 4$ terms};
 
-\node[stepbox=CrawlEmerald, below=0.75cm of s4] (s5) {\textbf{5. Re-Rank Scoring}\\[2pt]\texttt{score\_document\_relevance}\\Title $+4.0$, URL/Snip $+1.5$,\\Auth $+1.5$, Boilerplate $-4.0$};
-\node[stepbox=SearchCyan, left=of s5] (s6) {\textbf{6. Mode + Hydration}\\[2pt]\texttt{filter\_hits\_by\_mode}\\Batch fetch \texttt{page\_payloads}\\Zstd L3 decompress top 5};
-\node[stepbox=GatewayIndigo, left=of s6] (s7) {\textbf{7. Cited Synthesis}\\[2pt]Gemini 2.5 Flash (4.5s)\\or Extractive Fallback\\Inline \texttt{[1]..[N]} Citations};
-\node[stepbox=EdgeBlue, left=of s7] (s8) {\textbf{8. Focused Excerpts}\\[2pt]320-char query-centered\\snippet rewrite + IPA/ref\\\& Getty cleanup};
+% Row 1: Client & CDN
+\node[cnode=NavyPrimary] (browser) {
+    \logoicon[13pt]{react}\;\logoicon[13pt]{typescript}\;\logoicon[13pt]{vite}\\[3pt]
+    \textbf{\small Browser Client (SPA)}\\
+    {\scriptsize React 18 · Tailwind v4 · DOMPurify\\5-min \texttt{sessionStorage} Cache}
+};
+
+\node[cnode=BorderGray, right=1.8cm of browser] (ghpages) {
+    \logoicon[13pt]{githubpages}\;\logoicon[13pt]{githubactions}\\[3pt]
+    \textbf{\small GitHub Pages \& Actions}\\
+    {\scriptsize \texttt{deploy\_pages.yml} · \texttt{ci\_cd.yml}\\Preconnect TLS · Static Assets}
+};
+
+% Row 2: Gateway
+\node[cnode=NavyPrimary, below=1.95cm of $(browser)!0.5!(ghpages)$, text width=4.8cm] (gateway) {
+    \logoicon[13pt]{render}\;\logoicon[13pt]{fastapi}\;\logoicon[13pt]{connectrpc}\\[3pt]
+    \textbf{\small \texttt{neutron-gateway} (Render Free)}\\
+    {\scriptsize REST · SSE \texttt{/search/stream} · \texttt{GatewayService}\\\texttt{\_TTLCache} (300\,s) · \texttt{slowapi} · \texttt{X-Request-Id}}
+};
+
+% Row 3: Search & Crawler
+\node[cnode=TealAccent, below left=1.35cm and 0.35cm of gateway, text width=4.3cm] (searchsvc) {
+    \logoicon[13pt]{fastapi}\;\logoicon[13pt]{python}\;\logoicon[13pt]{connectrpc}\\[3pt]
+    \textbf{\small \texttt{neutron-search} (Render Free)}\\
+    {\scriptsize \texttt{SearchService} (ConnectRPC)\\FTS5 Query · Re-ranking · Reader\\Gemini + Extractive Synthesis}
+};
+
+\node[cnode=TealAccent, below right=1.35cm and 0.35cm of gateway, text width=4.3cm] (crawlersvc) {
+    \logoicon[13pt]{fastapi}\;\logoicon[13pt]{curl}\;\logoicon[13pt]{connectrpc}\\[3pt]
+    \textbf{\small \texttt{neutron-crawler} (Render Free)}\\
+    {\scriptsize \texttt{CrawlerService} (\texttt{StreamCrawl})\\6 Parallel Adapters · Chrome 124 TLS\\1M Bloom Filter · 12\,KB SimHash}
+};
+
+% Row 4: Data & External Services
+\node[cnode=NavyPrimary, below=1.4cm of searchsvc, text width=4.3cm] (turso) {
+    \logoicon[13pt]{turso}\;\logoicon[13pt]{sqlite}\\[3pt]
+    \textbf{\small Turso LibSQL (Serverless)}\\
+    {\scriptsize \texttt{search\_index} · \texttt{search\_fts} (Porter)\\\texttt{page\_payloads} (Zstd L3) · \texttt{hot\_topics}}
+};
+
+\node[cnode=BorderGray, left=0.9cm of turso, text width=3.3cm] (gemini) {
+    \logoicon[13pt]{gemini}\\[3pt]
+    \textbf{\small Gemini 2.5 Flash}\\
+    {\scriptsize Optional REST API\\4.5\,s Timeout · Citations}
+};
+
+\node[cnode=NavyPrimary, below=1.4cm of crawlersvc, text width=4.3cm] (web) {
+    \logoicon[12pt]{duckduckgo}\;\logoicon[12pt]{wikipedia}\;\logoicon[12pt]{arxiv}\;\logoicon[12pt]{github}\;\logoicon[12pt]{reddit}\;\logoicon[12pt]{hackernews}\\[3pt]
+    \textbf{\small Open Web \& Discovery APIs}\\
+    {\scriptsize DDG · Wikipedia · arXiv · GitHub · Reddit · HN\\\texttt{robots.txt} Enforced · Domain Diversity}
+};
+
+% Background Render Cluster Boundary
+\begin{scope}[on background layer]
+    \node[zone, fit=(gateway)(searchsvc)(crawlersvc)] (rzone) {};
+    \node[anchor=north east, font=\scriptsize\bfseries\color{MutedInk}, inner sep=5pt] at (rzone.north east) {Render Free Web Services (Oregon · Python 3.12.8)};
+\end{scope}
+
+% Edges
+\draw[darr] (ghpages) -- node[above, font=\scriptsize\color{MutedInk}] {Static Bundle} (browser);
+\draw[arr] (browser.south) |- ++(0,-0.40cm) -| node[pos=0.25, above, font=\scriptsize\bfseries\color{NavyPrimary}] {HTTPS JSON / SSE} (gateway.north);
+\draw[arr] (gateway.south west) -- node[left, font=\scriptsize, align=right, color=BodyInk] {ConnectRPC / HTTPS\\Bearer + \texttt{X-Request-Id}} (searchsvc.north);
+\draw[arr, color=TealAccent] (gateway.south east) -- node[right, font=\scriptsize, align=left, color=BodyInk] {\texttt{StreamCrawl} Stream\\55\,s RPC Timeout} (crawlersvc.north);
+\draw[arr] (searchsvc.south) -- node[left, font=\scriptsize, color=MutedInk] {\texttt{libsql-client}} (turso.north);
+\draw[arr] (crawlersvc.south west) -- node[above left, font=\scriptsize, color=MutedInk] {Batch Upsert} (turso.north east);
+\draw[darr] (searchsvc.west) -| node[above, near start, font=\scriptsize, color=MutedInk] {REST (Optional)} (gemini.north);
+\draw[arr, color=TealAccent] (crawlersvc.south) -- node[right, font=\scriptsize, color=MutedInk] {\texttt{httpx} + \texttt{curl\_cffi}} (web.north);
+
+\end{tikzpicture}}
+\caption{Cloud infrastructure and inter-service communication boundaries.}
+\label{fig:cloud-arch}
+\end{figure}
+
+\subsection{Cold-Start \& Cross-Origin Resilience}
+Free-tier Render services sleep after 15 minutes of inactivity and require roughly 30--50 seconds to cold-boot:
+\begin{itemize}[leftmargin=1.4em, itemsep=2pt]
+    \item \textbf{Auto-Resolved Blueprint URLs:} In \texttt{services/common/config.py}, when \texttt{RENDER=true} and local overrides are unset, \texttt{GatewayServiceSettings} defaults to the public \texttt{.onrender.com} hostnames.
+    \item \textbf{Throttled Warm-Up Pings:} \texttt{\_maybe\_wake\_downstream()} issues background \texttt{/health} requests (throttled to at most once every \texttt{180\,s}) to both \texttt{neutron-search} and \texttt{neutron-crawler} on \texttt{/health}, \texttt{/stats}, or downstream \texttt{502}/\texttt{503} failures.
+    \item \textbf{Preconnect \& Timeout Envelope:} \texttt{frontend/index.html} declares \texttt{<link rel="preconnect">} to \texttt{neutron-gateway.onrender.com}, while \texttt{RPC\_TIMEOUT\_MS=55000} spans cold container boots. Custom \texttt{429} and \texttt{500} FastAPI exception handlers ensure CORS headers remain attached when downstream calls fail.
+\end{itemize}
+
+% ==============================================================================
+% SECTION 3: HIGH-LEVEL DESIGN (HLD)
+% ==============================================================================
+\section{High-Level Design (HLD): Request Lifecycle \& Streaming}
+
+Every search query enters either \texttt{/search} (JSON), \texttt{/api/research} (agent JSON + full Markdown), or \texttt{/search/stream} (SSE). Figure~\ref{fig:hld-sequence} depicts the streaming cascade executed for interactive browser searches.
+
+\begin{figure}[H]
+\centering
+\resizebox{0.97\textwidth}{!}{\begin{tikzpicture}[
+    actor/.style={rectangle, rounded corners=3pt, draw=NavyPrimary, fill=SurfaceTint, text width=2.75cm, align=center, font=\scriptsize\bfseries\color{HeadingInk}, inner sep=5pt, line width=0.7pt},
+    msg/.style={-{Stealth[length=2mm]}, line width=0.75pt, draw=NavyPrimary},
+    ret/.style={-{Stealth[length=2mm]}, dashed, line width=0.75pt, draw=TealAccent},
+    note/.style={rectangle, rounded corners=2pt, draw=BorderGray, fill=white, font=\scriptsize, inner sep=4pt, align=left}
+]
+
+\node[actor] (u) {\logoicon[10pt]{react}\; Browser SPA};
+\node[actor, right=0.65cm of u] (g) {\logoicon[10pt]{fastapi}\; Gateway};
+\node[actor, right=0.65cm of g] (s) {\logoicon[10pt]{python}\; SearchService};
+\node[actor, right=0.65cm of s] (c) {\logoicon[10pt]{curl}\; CrawlerService};
+\node[actor, right=0.65cm of c] (d) {\logoicon[10pt]{turso}\; Turso / Gemini};
+
+\foreach \x in {u,g,s,c,d} {
+    \draw[LightRule, line width=0.8pt] (\x.south) -- ++(0,-9.8cm);
+}
+
+\draw[msg] ($(u.south)+(0,-0.7)$) -- node[above, font=\scriptsize] {\texttt{GET /search/stream?q=...\&mode=all}} ($(g.south)+(0,-0.7)$);
+\node[note, anchor=west] at ($(g.south)+(0.15,-1.4)$) {Check \texttt{\_TTLCache} (300\,s) unless \texttt{refresh=true}; assign \texttt{X-Request-Id}};
+
+\draw[msg] ($(g.south)+(0,-2.15)$) -- node[above, font=\scriptsize] {\texttt{RecordHotTopic} (async) + \texttt{QueryIndex}} ($(s.south)+(0,-2.15)$);
+\draw[msg] ($(s.south)+(0,-2.75)$) -- node[above, font=\scriptsize] {Wide FTS5 MATCH + Zstd Hydrate + Synthesis} ($(d.south)+(0,-2.75)$);
+\draw[ret] ($(d.south)+(0,-3.3)$) -- node[above, font=\scriptsize] {Ranked Documents + Grounded Summary} ($(s.south)+(0,-3.3)$);
+\draw[ret] ($(s.south)+(0,-3.85)$) -- node[above, font=\scriptsize] {\texttt{QueryIndexResponse}} ($(g.south)+(0,-3.85)$);
+\draw[ret] ($(g.south)+(0,-4.4)$) -- node[above, font=\scriptsize] {\textbf{SSE} \texttt{cached\_results}} ($(u.south)+(0,-4.4)$);
+
+\draw[BorderGray, dashed, rounded corners=3pt, fill=SurfaceTint, fill opacity=0.45]
+    ($(u.south)+(-0.25,-4.75)$) rectangle ($(d.south)+(1.0,-8.75)$);
+\node[anchor=north west, font=\scriptsize\bfseries\color{NavyPrimary}] at ($(u.south)+(-0.15,-4.82)$) {Condition: \texttt{refresh=true} OR \texttt{len(cached) < JIT\_CACHE\_THRESHOLD (5)}};
+
+\draw[msg, color=TealAccent] ($(g.south)+(0,-5.65)$) -- node[above, font=\scriptsize] {\texttt{StreamCrawl(q, max=8, force\_refresh)}} ($(c.south)+(0,-5.65)$);
+\draw[ret] ($(c.south)+(0,-6.15)$) -- node[above, font=\scriptsize] {\texttt{discovery\_result} events (6 sources)} ($(g.south)+(0,-6.15)$);
+\draw[msg, color=TealAccent] ($(c.south)+(0,-6.75)$) -- node[above, font=\scriptsize] {Batch upsert \texttt{search\_index} + \texttt{page\_payloads}} ($(d.south)+(0,-6.75)$);
+\draw[ret] ($(c.south)+(0,-7.35)$) -- node[above, font=\scriptsize] {\textbf{SSE} \texttt{crawl\_start} / \texttt{crawl\_success} / \texttt{live\_result}} ($(u.south)+(0,-7.35)$);
+\draw[msg] ($(g.south)+(0,-8.0)$) -- node[above, font=\scriptsize] {\texttt{SynthesizeAnswer} (Combined Pool $\to$ Top 5)} ($(s.south)+(0,-8.0)$);
+\draw[ret] ($(s.south)+(0,-8.45)$) -- node[above, font=\scriptsize] {\textbf{SSE} \texttt{answer} (Gemini / Extractive)} ($(u.south)+(0,-8.45)$);
+
+\draw[ret, color=HeadingInk] ($(g.south)+(0,-9.25)$) -- node[above, font=\scriptsize] {\textbf{SSE} \texttt{done} (\texttt{timings}, \texttt{cache\_hit}, \texttt{request\_id})} ($(u.south)+(0,-9.25)$);
+
+\end{tikzpicture}}
+\caption{High-Level Design: Cache-first and JIT server-streaming execution sequence.}
+\label{fig:hld-sequence}
+\end{figure}
+
+\subsection{Caching Hierarchy, Refresh Merging \& Failure Reporting}
+\begin{itemize}[leftmargin=1.4em, itemsep=2pt]
+    \item \textbf{Two-Layer Caching:} The React client checks \texttt{sessionStorage} (\texttt{5}-minute TTL keyed by \texttt{mode:query}), while \texttt{neutron-gateway} checks an in-memory \texttt{\_TTLCache} (\texttt{256} query entries at \texttt{300\,s}, plus connected \texttt{/stats} for \texttt{30\,s}).
+    \item \textbf{In-Place Refresh Replacement:} When \texttt{refresh=true} is passed, caches are bypassed and \texttt{StreamCrawl} receives empty \texttt{skip\_urls}. Returned live documents replace stale cached documents at matching URLs inside both \texttt{neutron-gateway} and React state, triggering fresh synthesis over up to \texttt{max(12, limit)} candidates.
+    \item \textbf{Explicit Error Propagation:} If both \texttt{SearchService} and \texttt{CrawlerService} fail during an SSE stream with zero cached hits, Gateway emits \texttt{event: backend\_error} so the UI displays a retryable wake-up notice rather than reporting zero matches.
+\end{itemize}
+
+% ==============================================================================
+% SECTION 4: LOW-LEVEL DESIGN (LLD)
+% ==============================================================================
+\clearpage
+\section{Low-Level Design (LLD): Internals \& Algorithms}
+
+\subsection{Protobuf Contracts, Streaming Auth \& 64-Bit Identifiers}
+All service interfaces are defined in \texttt{proto/neutron/v1/neutron.proto} and compiled via \texttt{scripts/gen\_proto.py} (\texttt{protoc-gen-py} + \texttt{protoc-gen-connectrpc}).
+
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.28}
+\begin{tabularx}{\textwidth}{@{}p{2.65cm} >{\ttfamily\scriptsize\raggedright\arraybackslash}p{4.85cm} >{\raggedright\arraybackslash}X@{}}
+\toprule
+\textbf{Service} & \textbf{RPC Surface (\texttt{proto3})} & \textbf{Implementation Details} \\
+\midrule
+SearchService & QueryIndex, SynthesizeAnswer, GetDocument, Suggest, GetTrending, GetStats, RecordHotTopic & Runs \texttt{3x} candidate pre-fetch when \texttt{mode != "all"} (\texttt{2x} otherwise), re-ranks, decompresses top-5 payloads, and invokes synthesis. \\
+CrawlerService & DiscoverSeeds, CrawlUrl, DiscoverAndCrawl, StreamCrawl & Runs concurrent discovery + \texttt{curl\_cffi} fetch pool; \texttt{StreamCrawl} yields \texttt{CrawlStreamEvent} messages via \texttt{asyncio.Queue} with clean cancellation. \\
+GatewayService & Search, Suggest, GetStats, GetDocument & Public ConnectRPC/gRPC-Web mirror mounted alongside REST/SSE endpoints. \\
+\bottomrule
+\end{tabularx}
+\caption{Compiled ConnectRPC service contracts in \texttt{neutron\_rpc/neutron/v1/}.}
+\end{table}
+
+\begin{designnote}[Auth Interceptor \& JavaScript 64-Bit Precision]
+\textbf{Unified Unary + Stream Interception:} \texttt{InternalAuthInterceptor} (\texttt{services/common/rpc.py}) extends \texttt{connectrpc.interceptor.MetadataInterceptor[None]}, checking \texttt{Authorization: Bearer} or \texttt{x-internal-key} with \texttt{hmac.compare\_digest} across both unary RPCs and \texttt{StreamCrawl}.\\[3pt]
+\textbf{64-Bit Hash Serialization:} \texttt{hash\_url()} maps \texttt{xxhash.xxh64} digests to signed 64-bit SQLite integers. Because JavaScript loses integer precision above $2^{53}-1$, Protobuf and REST payloads serialize \texttt{url\_hash} strictly as decimal strings.
+\end{designnote}
+
+\subsection{Query Normalization, FTS5 Grouping \& Multi-Signal Ranking}
+Literal full-text matching struggles on conversational queries (for example, \emph{``what is the main purpose of the joining in SQL''} or \emph{``when bangladesh is established''}). Figure~\ref{fig:lld-ranking} outlines the eight-stage transformation pipeline implemented across \texttt{spaces/crawler/db\_turso.py} and \texttt{spaces/crawler/synthesis.py}.
+
+\begin{figure}[H]
+\centering
+\resizebox{0.97\textwidth}{!}{\begin{tikzpicture}[
+    node distance=0.45cm and 0.45cm,
+    snode/.style={
+        rectangle, rounded corners=3pt, draw=NavyPrimary, fill=white,
+        line width=0.7pt, text width=3.15cm, align=center, font=\scriptsize, inner sep=5pt
+    },
+    arr/.style={-{Stealth[length=2mm]}, line width=0.75pt, draw=NavyPrimary}
+]
+\node[snode] (s1) {\textbf{1. Framing Strip}\\[2pt]\texttt{normalize\_search\_query}\\Removes \textit{what/who/when/\\where/how/why} lead-ins};
+\node[snode, right=of s1] (s2) {\textbf{2. Sanitize \& Filter}\\[2pt]\texttt{sanitize\_fts\_terms}\\Strips FTS ops, stopwords,\\filler (\textit{purpose, main}); cap 8};
+\node[snode, right=of s2] (s3) {\textbf{3. Inflect \& Group}\\[2pt]\texttt{\_expand\_term\_variants}\\(\texttt{"joining" OR "join"}\\OR \texttt{"joins" OR "joined"})};
+\node[snode, right=of s3] (s4) {\textbf{4. Explicit AND + Quorum}\\[2pt]FTS5 \texttt{BM25(4.0, 1.5, 0.5)}\\Fallback: $\ge 70\%$ terms\\(min 3) when $\ge 4$ terms};
+
+\node[snode, below=0.75cm of s4] (s5) {\textbf{5. Re-Rank Scoring}\\[2pt]\texttt{score\_document\_relevance}\\Title $+4.0$, URL/Snip $+1.5$,\\Auth $+1.5$, Boilerplate $-4.0$};
+\node[snode, left=of s5] (s6) {\textbf{6. Mode + Hydration}\\[2pt]\texttt{filter\_hits\_by\_mode}\\Batch load \texttt{page\_payloads}\\Zstd L3 decompress top 5};
+\node[snode, left=of s6] (s7) {\textbf{7. Cited Synthesis}\\[2pt]Gemini 2.5 Flash (4.5\,s)\\or Extractive Fallback\\Inline \texttt{[1]..[N]} Citations};
+\node[snode, left=of s7] (s8) {\textbf{8. Excerpt Cleanup}\\[2pt]320-char query-focused\\snippet + IPA, ref \&\\photo-credit stripping};
 
 \draw[arr] (s1) -- (s2);
 \draw[arr] (s2) -- (s3);
@@ -540,122 +440,112 @@ Natural-language questions severely degrade literal full-text recall if passed r
 \draw[arr] (s6) -- (s7);
 \draw[arr] (s7) -- (s8);
 \end{tikzpicture}}
-\caption{Low-Level Design (LLD): Query sanitization, SQLite FTS5 safe grouping, re-ranking, and synthesis pipeline.}
+\caption{Low-Level Design: Query sanitization, FTS5 grouping, re-ranking, and synthesis pipeline.}
 \label{fig:lld-ranking}
 \end{figure}
 
-For example, the conversational query \emph{``what is the main purpose of the joining in SQL''} is reduced cleanly to \texttt{["joining", "sql"]}, expanded to \texttt{("joining" OR "join" OR "joins" OR "joined") AND "sql"}, retrieved via SQLite FTS5 Porter-stemmed BM25, and re-ranked using \texttt{(matched\_terms, rel\_score, db\_score)} so authoritative SQL references outrank generic template repositories containing \texttt{main purpose of this project} (\texttt{-4.0} penalty when \texttt{mode != "code"}).
+In stage~3, parenthesized inflection groups are joined with explicit \texttt{\texttt{AND}} rather than implicit whitespace to satisfy SQLite FTS5 parser rules. \texttt{\_expand\_term\_variants} covers regular \texttt{-ing}, \texttt{-ies}, \texttt{-ed}, sibilant \texttt{-es} (\texttt{indexes} $\to$ \texttt{index}, \texttt{classes} $\to$ \texttt{class}), and plural \texttt{-s} forms. Stage~5 sorts candidates by \texttt{(matched\_terms, rel\_score, db\_score)} using host-boundary validation (\texttt{\_is\_authoritative\_host}) and penalizes generic repository template phrases when \texttt{mode != "code"}.
 
-\subsection{Discovery Scheduling, Chrome TLS Fetching \& Deduplication}
-The Crawler microservice (\texttt{services/crawler/app.py}, \texttt{spaces/crawler/}) enforces strict politeness, diversity, and deduplication invariants:
-\begin{enumerate}[leftmargin=1.4em, itemsep=2pt]
-    \item \textbf{Parallel Discovery \& 2-Pass Domain Diversity (\texttt{discovery.py}):} Concurrently queries active vertical adapters (DuckDuckGo HTML, Wikipedia API, HackerNews Algolia, Reddit JSON, arXiv Atom, GitHub Search, plus optional Brave Search) filtered by an active 24\,h WAF cooldown map (\texttt{\_get\_active\_waf\_domains}). Pass 1 caps \texttt{1} URL per hostname for source diversity; Pass 2 backfills multi-article knowledge hubs (\texttt{en.wikipedia.org}, \texttt{arxiv.org}, \texttt{github.com}, \texttt{stackoverflow.com}) up to \texttt{max\_urls}.
-    \item \textbf{Polite Fetch \& Parsing (\texttt{robots.py}, \texttt{parser.py}):} Checks per-domain cached \texttt{robots.txt} (\texttt{NeutronBot/3.0}, 24\,h TTL, \texttt{asyncio.Lock} per domain, fractional \texttt{Crawl-delay} parser) before executing \texttt{curl\_cffi.requests.AsyncSession(impersonate="chrome124")} under an \texttt{asyncio.Semaphore(12)}. \texttt{selectolax.lexbor} extracts \texttt{\_\_NEXT\_DATA\_\_} SSR state, JSON-LD author/publish timestamps, clean Markdown blocks, \texttt{max\_links=80} followable outbound links (filtering \texttt{nofollow}/\texttt{sponsored}/\texttt{ugc}), and rejects Cloudflare/Akamai interstitials (\texttt{is\_waf\_or\_empty\_page}).
-    \item \textbf{Fast Bounded Deduplication (\texttt{bloom.py}, \texttt{dedup.py}, \texttt{compression.py}):}
-    \begin{itemize}[leftmargin=1.2em]
-        \item \emph{URL Bloom Filter:} $10^6$ capacity (\texttt{0.1\%} FP rate) using \texttt{mmh3} + \texttt{bitarray}, warmed from Turso \texttt{search\_index} on crawler startup.
-        \item \emph{12\,KB SimHash:} 64-bit Charikar fingerprint over weighted unigrams and 2-gram shingles bounded to the leading \texttt{12,000} characters (\texttt{simhash\_ms} reduced from \texttt{293\,ms} to \texttt{~15\,ms}), checking per-domain \texttt{Hamming <= 3} before atomic write.
-        \item \emph{Zstandard Payloads:} Compresses extracted Markdown via \texttt{zstd.ZstdCompressor(level=3)} and writes \texttt{domains}, \texttt{search\_index}, and \texttt{page\_payloads} in one Turso batch transaction.
-    \end{itemize}
+\subsection{Live Discovery, Parsing \& Bounded Deduplication}
+\begin{enumerate}[leftmargin=1.4em, itemsep=3pt]
+    \item \textbf{Two-Pass Domain Diversity (\texttt{discovery.py}):} Concurrently queries DuckDuckGo HTML, Wikipedia API, HackerNews Algolia, Reddit JSON, arXiv Atom, GitHub Search (plus optional Brave Search) excluding domains in the 24\,h WAF cooldown cache. Pass~1 selects at most \texttt{1} URL per domain; Pass~2 backfills remaining slots up to \texttt{max\_urls} from multi-article hubs (\texttt{en.wikipedia.org}, \texttt{arxiv.org}, \texttt{github.com}, \texttt{stackoverflow.com}).
+    \item \textbf{Polite Chrome-Impersonated Fetch (\texttt{robots.py}, \texttt{parser.py}):} Fetches \texttt{robots.txt} per domain under an \texttt{asyncio.Lock} (24\,h TTL, supporting fractional \texttt{Crawl-delay}), then executes \texttt{curl\_cffi} (\texttt{impersonate="chrome124"}) capped at \texttt{12} concurrent fetches. \texttt{selectolax.lexbor} extracts \texttt{\_\_NEXT\_DATA\_\_} SSR JSON, Schema.org JSON-LD metadata, structured Markdown, and up to \texttt{max\_links=80} followable outbound links while filtering Cloudflare/Akamai challenge pages (\texttt{is\_waf\_or\_empty\_page}).
+    \item \textbf{Deduplication \& Compression (\texttt{bloom.py}, \texttt{dedup.py}, \texttt{compression.py}):} A $10^6$-capacity \texttt{URLBloomFilter} (\texttt{mmh3} + \texttt{bitarray}, \texttt{0.1\%} FP rate) warms from \texttt{search\_index} at boot. Before saving, \texttt{compute\_simhash} hashes unigrams and 2-gram shingles over the leading \texttt{12,000} characters (\texttt{Hamming <= 3} per domain), avoiding multi-second CPU stalls on 2\,MB encyclopedia pages, and \texttt{zstd.ZstdCompressor(level=3)} compresses full Markdown into \texttt{page\_payloads}.
 \end{enumerate}
 
 % ==============================================================================
-% SECTION 5: DATABASE SCHEMA & DATA MODELING
+% SECTION 5: STORAGE MODEL
 % ==============================================================================
 \clearpage
-\section{Storage Schema \& Data Modeling (\texttt{Turso LibSQL FTS5})}
+\section{Storage Schema (\texttt{Turso LibSQL FTS5})}
 
-All relational metadata, full-text virtual indexes, compressed page blobs, frontier queues, and trending topic counters coexist inside one serverless Turso LibSQL database (\texttt{migrations/03\_turso\_fts5\_schema.sql}), eliminating multi-database sync overhead.
+All tables, FTS5 virtual indexes, synchronization triggers, compressed blobs, and crawl queues reside in one serverless Turso LibSQL database (\texttt{migrations/03\_turso\_fts5\_schema.sql}), illustrated in Figure~\ref{fig:erd}.
 
 \begin{figure}[H]
 \centering
-\resizebox{0.96\textwidth}{!}{\begin{tikzpicture}[
-    node distance=0.9cm and 1.3cm,
-    erd/.style 2 args={
-        rectangle, rounded corners=4pt, draw=#1, fill=white, line width=0.9pt,
-        inner sep=0pt, minimum width=5.0cm,
-        drop shadow={shadow xshift=0.5pt, shadow yshift=-1pt, opacity=0.1}
-    },
-    arr/.style={-{Stealth[length=2.1mm]}, line width=0.85pt, draw=SlateDark},
-    trig/.style={-{Stealth[length=2.1mm]}, dashed, line width=0.85pt, draw=SearchCyan}
+\resizebox{0.95\textwidth}{!}{\begin{tikzpicture}[
+    node distance=0.95cm and 1.4cm,
+    arr/.style={-{Stealth[length=2.1mm]}, line width=0.75pt, draw=NavyPrimary},
+    trig/.style={-{Stealth[length=2.1mm]}, dashed, line width=0.75pt, draw=TealAccent}
 ]
 
-\newcommand{\erdnode}[4]{%
-    \begin{tcolorbox}[enhanced, colback=white, colframe=#1, colbacktitle=#1, coltitle=white,
-        fonttitle=\scriptsize\bfseries, title=#2, width=5.1cm, boxrule=0.85pt, arc=4pt,
-        left=6pt, right=6pt, top=5pt, bottom=5pt, nobeforeafter]
+\newcommand{\erdbox}[3]{%
+    \begin{tcolorbox}[enhanced, colback=white, colframe=#1, colbacktitle=SurfaceTint, coltitle=HeadingInk,
+        fonttitle=\scriptsize\bfseries, title=#2, width=5.2cm, boxrule=0.75pt, arc=3pt,
+        left=7pt, right=7pt, top=5pt, bottom=5pt, borderline north={1.8pt}{0pt}{#1}, nobeforeafter]
         \scriptsize\raggedright #3
     \end{tcolorbox}%
 }
 
-\node[inner sep=0pt] (domains) {\erdnode{CrawlEmerald}{\texttt{domains} (Politeness)}{%
+\node[inner sep=0pt] (domains) {\erdbox{NavyPrimary}{\texttt{domains} \textemdash{} Domain Politeness}{%
     \textbf{PK} \texttt{domain\_hash} (INT64)\\
     \texttt{hostname} (TEXT UNIQUE)\\
     \texttt{crawl\_delay\_ms}, \texttt{next\_fetch\_at}\\
     \texttt{total\_crawled}, \texttt{is\_blacklisted}%
-}{}};
+}};
 
-\node[inner sep=0pt, right=of domains] (frontier) {\erdnode{EdgeBlue}{\texttt{frontier\_queue} (Leased Tasks)}{%
+\node[inner sep=0pt, right=of domains] (frontier) {\erdbox{NavyPrimary}{\texttt{frontier\_queue} \textemdash{} Crawl Queue}{%
     \textbf{PK} \texttt{url\_hash} (INT64)\\
     \textbf{FK} \texttt{domain\_hash} $\to$ \texttt{domains}\\
     \texttt{url}, \texttt{priority\_score}, \texttt{status (0..3)}\\
     \texttt{lease\_expires\_at} (5-min lease)%
-}{}};
+}};
 
-\node[inner sep=0pt, below=of domains] (sindex) {\erdnode{StorageAmber}{\texttt{search\_index} (Document Catalog)}{%
+\node[inner sep=0pt, below=of domains] (sindex) {\erdbox{TealAccent}{\texttt{search\_index} \textemdash{} Document Catalog}{%
     \textbf{PK} \texttt{url\_hash} (INT64 \texttt{xxh64})\\
     \texttt{domain\_hash}, \texttt{canonical\_url}\\
-    \texttt{title}, \texttt{snippet}, \texttt{opic\_authority}\\
+    \texttt{title}, \texttt{snippet}, \texttt{topic\_authority}\\
     \texttt{simhash} (INT64), \texttt{crawled\_at}%
-}{}};
+}};
 
-\node[inner sep=0pt, right=of sindex] (payloads) {\erdnode{GatewayIndigo}{\texttt{page\_payloads} (Markdown Blobs)}{%
+\node[inner sep=0pt, right=of sindex] (payloads) {\erdbox{TealAccent}{\texttt{page\_payloads} \textemdash{} Markdown Store}{%
     \textbf{PK/FK} \texttt{url\_hash} $\to$ \texttt{search\_index}\\
     \texttt{compressed\_text} (Zstd BLOB)\\
     \texttt{updated\_at}\\
     (\texttt{ON DELETE CASCADE})%
-}{}};
+}};
 
-\node[inner sep=0pt, below=of sindex] (fts) {\erdnode{SearchCyan}{\texttt{search\_fts} (FTS5 Virtual)}{%
+\node[inner sep=0pt, below=of sindex] (fts) {\erdbox{NavyPrimary}{\texttt{search\_fts} \textemdash{} FTS5 Virtual Table}{%
     \textbf{rowid} = \texttt{search\_index.url\_hash}\\
-    Cols: \texttt{title, snippet, canonical\_url}\\
+    Columns: \texttt{title, snippet, canonical\_url}\\
     Tokenizer: \texttt{porter unicode61}\\
-    Synced via \texttt{AI / AD / AU} Triggers%
-}{}};
+    Synced via \texttt{AI / AD / AU} triggers%
+}};
 
-\node[inner sep=0pt, right=of fts] (hot) {\erdnode{SlateDark}{\texttt{hot\_topics} (Trending \& Suggest)}{%
+\node[inner sep=0pt, right=of fts] (hot) {\erdbox{MutedInk}{\texttt{hot\_topics} \textemdash{} Trending \& Suggest}{%
     \textbf{PK} \texttt{term} (TEXT, $\le 40$ chars)\\
-    \texttt{frequency} (INT Counter)\\
+    \texttt{frequency} (INTEGER counter)\\
     \texttt{last\_searched\_at}\\
-    (Zero user/session/IP fields)%
-}{}};
+    (No user, session, or IP columns)%
+}};
 
-\draw[arr] (frontier.west) -- node[above, font=\scriptsize] {FK} (domains.east);
-\draw[arr] (payloads.west) -- node[above, font=\scriptsize] {Cascade} (sindex.east);
-\draw[trig] (sindex.south) -- node[right, font=\scriptsize] {SQL Triggers} (fts.north);
+\draw[arr] (frontier.west) -- node[above, font=\scriptsize\color{MutedInk}] {FK} (domains.east);
+\draw[arr] (payloads.west) -- node[above, font=\scriptsize\color{MutedInk}] {Cascade} (sindex.east);
+\draw[trig] (sindex.south) -- node[right, font=\scriptsize\color{TealAccent}] {SQL Triggers} (fts.north);
 
 \end{tikzpicture}}
-\caption{Turso LibSQL Entity-Relationship Diagram (\texttt{migrations/03\_turso\_fts5\_schema.sql}).}
+\caption{Turso LibSQL relational and FTS5 schema (\texttt{migrations/03\_turso\_fts5\_schema.sql}).}
 \label{fig:erd}
 \end{figure}
 
 % ==============================================================================
-% SECTION 6: PERFORMANCE TUNING, BUDGETS & VERIFICATION
+% SECTION 6: BUDGETS, SECURITY & VERIFICATION
 % ==============================================================================
-\section{Latency Budgets, Free-Tier Engineering \& Verification}
+\clearpage
+\section{Latency Budgets, Security Controls \& Tooling}
 
-Operating Python async microservices on Render Free (\texttt{0.1\,vCPU}, \texttt{512\,MB} RAM) requires strict deadline and CPU budgeting so long-tail targets never starve fast sources. Figure~\ref{fig:latency-budgets} summarizes the configured stage budgets across Neutron's execution paths.
+Figure~\ref{fig:latency-budgets} summarizes the configured stage budgets defined in \texttt{services/common/config.py}. Tight per-fetch (\texttt{3.5\,s}), Gemini (\texttt{4.5\,s}), and JIT batch (\texttt{8.5\,s}) ceilings keep streaming responses interactive while still completing Turso writes on free-tier compute.
 
 \begin{figure}[H]
 \centering
 \begin{tikzpicture}
 \begin{axis}[
     xbar,
-    width=0.92\textwidth,
-    height=5.6cm,
-    bar width=9pt,
-    xmin=0, xmax=10.5,
-    xlabel={\small Configured Execution Envelope / Latency Bound (Seconds)},
+    width=0.90\textwidth,
+    height=5.2cm,
+    bar width=8.5pt,
+    xmin=0, xmax=10.2,
+    xlabel={\small Configured Latency Ceiling (Seconds)},
     symbolic y coords={
         Warm TTL / Session Cache,
         HTML Parse + 12KB SimHash,
@@ -664,16 +554,16 @@ Operating Python async microservices on Render Free (\texttt{0.1\,vCPU}, \texttt
         StreamCrawl JIT Batch Deadline
     },
     ytick=data,
-    yticklabel style={font=\scriptsize\color{DeepNavy}},
+    yticklabel style={font=\scriptsize\color{HeadingInk}},
     nodes near coords={\pgfmathprintnumber[fixed,precision=2]{\pgfplotspointmeta}\,s},
-    nodes near coords style={font=\scriptsize\bfseries\color{SlateDark}},
+    nodes near coords style={font=\scriptsize\color{NavyPrimary}},
     nodes near coords align={horizontal},
     grid=major,
-    major grid style={RuleGray},
-    axis line style={CardBorder},
+    major grid style={LightRule},
+    axis line style={BorderGray},
     enlarge y limits=0.18
 ]
-\addplot[fill=SearchCyan!80!white, draw=SearchCyan] coordinates {
+\addplot[fill=NavyPrimary!78!white, draw=NavyPrimary] coordinates {
     (0.01,Warm TTL / Session Cache)
     (0.25,HTML Parse + 12KB SimHash)
     (3.50,Robots + Live Page Fetch)
@@ -682,35 +572,36 @@ Operating Python async microservices on Render Free (\texttt{0.1\,vCPU}, \texttt
 };
 \end{axis}
 \end{tikzpicture}
-\caption{Configured latency ceilings (\texttt{services/common/config.py}) balancing recall and \texttt{0.1\,vCPU} responsiveness.}
+\caption{Configured latency envelopes across cache, crawl, and synthesis tiers.}
 \label{fig:latency-budgets}
 \end{figure}
 
-\subsection{Operational Tooling, CI/CD \& Quality Gates}
 \begin{table}[H]
 \centering
 \small
-\renewcommand{\arraystretch}{1.25}
-\begin{tabularx}{\textwidth}{>{\ttfamily\scriptsize\color{GatewayIndigo}\raggedright\arraybackslash}p{5.5cm} >{\raggedright\arraybackslash}X}
+\renewcommand{\arraystretch}{1.28}
+\begin{tabularx}{\textwidth}{@{}>{\ttfamily\scriptsize\color{NavyPrimary}\raggedright\arraybackslash}p{5.4cm} >{\raggedright\arraybackslash}X@{}}
 \toprule
-\textbf{Pipeline / Script} & \textbf{Verified Role in Current Stack} \\
+\textbf{Workflow / Utility} & \textbf{Function} \\
 \midrule
 .github/workflows/ci\_cd.yml &
-Runs \texttt{compileall}, \texttt{ruff check --select E9,F63,F7,F82,F401}, React \texttt{npm run build} (\texttt{tsc -b \&\& vite build}), \texttt{44} unit + live ConnectRPC/SSE tests, and Turso migration on \texttt{main}. \\
+Runs \texttt{compileall}, \texttt{ruff check --select E9,F63,F7,F82,F401}, Vite frontend build (\texttt{tsc -b \&\& vite build}), \texttt{44} unit/integration tests, and Turso schema migration. \\
 .github/workflows/deploy\_pages.yml &
-Compiles the Vite React SPA targeting \texttt{VITE\_API\_BASE\_URL} (\texttt{https://neutron-gateway.onrender.com}) and publishes static bundles to GitHub Pages. \\
+Builds \texttt{frontend/} targeting \texttt{VITE\_API\_BASE\_URL} (\texttt{https://neutron-gateway.onrender.com}) and publishes static bundles and PDF docs to GitHub Pages. \\
 scripts/gen\_proto.py &
-Recompiles \texttt{proto/neutron/v1/neutron.proto} into \texttt{neutron\_rpc/neutron/v1/} ConnectRPC \& Protobuf stubs. \\
+Regenerates Python ConnectRPC and Protobuf stubs from \texttt{proto/neutron/v1/neutron.proto}. \\
 scripts/refresh\_stale.py &
-Queries oldest rows via \texttt{row.asdict()}, validates \texttt{robots.txt} + \texttt{text/html}, and updates \texttt{search\_index} + Zstd \texttt{page\_payloads} preserving \texttt{1,200}-char snippets. \\
+Queries oldest \texttt{search\_index} rows (\texttt{row.asdict()}), verifies \texttt{robots.txt} and \texttt{text/html}, and updates Markdown payloads with full \texttt{1,200}-char snippets. \\
 \bottomrule
 \end{tabularx}
-\caption{Verified CI/CD workflows and operational maintenance utilities.}
+\caption{Continuous integration workflows and maintenance utilities.}
 \end{table}
 
-\begin{archcallout}[Verified Privacy \& Security Guarantee]{CrawlEmeraldBg}{CrawlEmerald}
-Neutron stores \textbf{zero cookies}, \textbf{zero advertising IDs}, and \textbf{zero client IP addresses}. Rate limiting (\texttt{30/min} search, \texttt{15/min} stream, \texttt{20/min} research) uses ephemeral in-memory keys; Reader Markdown passes through \texttt{marked} and \texttt{DOMPurify} (\texttt{ALLOWED\_URI\_REGEXP: \^{}https?://}); and all external anchors validate protocols via \texttt{safeHttpUrl}.
-\end{archcallout}
+\begin{designnote}[Privacy \& Frontend Security Summary]
+\begin{itemize}[leftmargin=1.2em, itemsep=2pt]
+    \item Rate limiting (\texttt{30/min} \texttt{/search}, \texttt{15/min} \texttt{/search/stream}, \texttt{20/min} \texttt{/api/research}) uses volatile in-memory \texttt{X-Forwarded-For} buckets and sets \texttt{X-Content-Type-Options: nosniff}, \texttt{Referrer-Policy: no-referrer}, and \texttt{Permissions-Policy: interest-cohort=()}.
+    \item Search snippets render strictly via React text nodes and \texttt{<mark>} spans (no \texttt{dangerouslySetInnerHTML}); Reader Markdown passes through \texttt{marked} + \texttt{DOMPurify} (\texttt{ALLOWED\_URI\_REGEXP: \^{}https?://}); and outbound anchors are filtered with \texttt{safeHttpUrl}.
+\end{itemize}
+\end{designnote}
 
 \end{document}
-

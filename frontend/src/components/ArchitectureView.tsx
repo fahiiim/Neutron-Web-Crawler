@@ -648,3 +648,4 @@ export const ArchitectureView: React.FC<ArchitectureViewProps> = ({
     </main>
   );
 };
+
