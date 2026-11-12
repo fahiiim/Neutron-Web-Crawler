@@ -345,7 +345,7 @@ class TursoCrawlerClient:
         if not terms:
             return []
 
-        and_pattern = " ".join(_format_fts_term(term) for term in terms)
+        and_pattern = " AND ".join(_format_fts_term(term) for term in terms)
         hits = await self._execute_fts(and_pattern, limit)
 
         # For 4+ terms, allow high-threshold quorum (>= 70%, min 3 terms) for typo resilience
@@ -353,7 +353,7 @@ class TursoCrawlerClient:
             core = terms[:6]
             quorum = max(3, min(len(core) - 1, math.ceil(len(core) * 0.7)))
             quorum_clauses = [
-                "(" + " ".join(_format_fts_term(t) for t in comb) + ")"
+                "(" + " AND ".join(_format_fts_term(t) for t in comb) + ")"
                 for comb in itertools.combinations(core, quorum)
             ]
             quorum_hits = await self._execute_fts(" OR ".join(quorum_clauses), limit)

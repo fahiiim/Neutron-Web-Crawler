@@ -37,7 +37,9 @@ _bg_task: Optional[asyncio.Task] = None
 def _to_metric_proto(metric: Dict[str, Any]) -> neutron_pb.DiscoveryMetric:
     return neutron_pb.DiscoveryMetric(
         source=str(metric.get("source") or ""),
-        urls_found=int(metric.get("urls_found") or metric.get("count") or 0),
+        urls_found=int(
+            metric.get("urls_found") or metric.get("url_count") or metric.get("count") or 0
+        ),
         duration_ms=int(metric.get("duration_ms") or 0),
         status=str(metric.get("status") or "ok"),
         error=str(metric.get("error") or ""),

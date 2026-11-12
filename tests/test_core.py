@@ -931,6 +931,43 @@ class TestFastAPIEndpoints(unittest.TestCase):
         ranked = sort_hits_by_relevance(q, [noisy_readme, sql_join_doc])
         self.assertEqual(ranked[0]["url"], sql_join_doc["url"])
 
+        # Verify FTS5 accepts explicit AND across parenthesized variant clauses in real SQLite
+        import asyncio
+        from spaces.crawler import db_turso as db_mod
+
+        fd, db_path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        file_uri = f"file:///{db_path.replace(os.sep, '/')}"
+        schema_path = os.path.join(
+            os.path.dirname(__file__), "..", "migrations", "03_turso_fts5_schema.sql"
+        )
+
+        async def _check_fts():
+            client = TursoCrawlerClient()
+            with (
+                patch.object(db_mod.settings, "TURSO_DATABASE_URL", file_uri),
+                patch.object(db_mod.settings, "TURSO_AUTH_TOKEN", "local-test-token"),
+            ):
+                await client.connect()
+                try:
+                    with open(schema_path, "r", encoding="utf-8") as f:
+                        for stmt in split_sql_statements(f.read()):
+                            await client._client.execute(stmt)
+                    await client.insert_search_index(
+                        777, 888, sql_join_doc["url"], sql_join_doc["title"], sql_join_doc["snippet"], 2.0, 111
+                    )
+                    return await client.search(q, limit=5)
+                finally:
+                    await client.close()
+
+        try:
+            hits = asyncio.run(_check_fts())
+            self.assertEqual(len(hits), 1)
+            self.assertEqual(hits[0]["url"], sql_join_doc["url"])
+        finally:
+            if os.path.exists(db_path):
+                os.remove(db_path)
+
     def test_gemini_synthesis_and_graceful_fallback(self):
         import asyncio
 

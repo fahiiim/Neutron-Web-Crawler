@@ -178,8 +178,8 @@ class SearchServiceImpl:
         return neutron_pb.GetTrendingResponse(
             trending=[
                 neutron_pb.TrendingTopic(
-                    topic=str(r.get("topic") or ""),
-                    hits=int(r.get("hits") or 0),
+                    topic=str(r.get("topic") or r.get("term") or ""),
+                    hits=int(r.get("hits") or r.get("count") or 0),
                 )
                 for r in rows
             ]
