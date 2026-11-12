@@ -59,8 +59,12 @@ class TestLeapcellConnectMicroservices(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(search_svc_mod.settings.PORT, 8080)
         self.assertEqual(gateway_svc_mod.settings.PORT, 8080)
 
-        with patch.dict(os.environ, {"RENDER": "true", "SEARCH_SERVICE_URL": ""}, clear=False):
-            cfg = gateway_svc_mod.GatewayServiceSettings()
+        with patch.dict(
+            os.environ,
+            {"RENDER": "true", "SEARCH_SERVICE_URL": "", "CRAWLER_SERVICE_URL": ""},
+            clear=False,
+        ):
+            cfg = gateway_svc_mod.GatewayServiceSettings(_env_file=None)
             self.assertEqual(cfg.SEARCH_SERVICE_URL, "https://neutron-search.onrender.com")
             self.assertEqual(cfg.CRAWLER_SERVICE_URL, "https://neutron-crawler.onrender.com")
 

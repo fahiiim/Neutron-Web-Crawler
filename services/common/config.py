@@ -82,6 +82,7 @@ class GatewayServiceSettings(ServiceBaseSettings):
                 not c_url
                 or c_url.startswith("http://127.0.0.1")
                 or c_url.startswith("http://localhost")
+                or "huggingface.co" in c_url
             ):
                 self.CRAWLER_SERVICE_URL = "https://neutron-crawler.onrender.com"
         return self
