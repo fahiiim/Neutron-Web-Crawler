@@ -5,12 +5,16 @@ import { apiUrl } from "../utils/api";
 interface HeaderProps {
   onGoHome: () => void;
   onOpenStats: () => void;
+  onOpenArchitecture: () => void;
+  currentView?: "search" | "architecture";
   pagesIndexed?: number;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   onGoHome,
   onOpenStats,
+  onOpenArchitecture,
+  currentView = "search",
   pagesIndexed,
 }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -51,6 +55,15 @@ export const Header: React.FC<HeaderProps> = ({
         <nav className="hidden sm:flex items-center gap-6 text-xs text-neutral-400">
           <button
             type="button"
+            onClick={onOpenArchitecture}
+            className={`hover:text-white transition-colors cursor-pointer ${
+              currentView === "architecture" ? "text-white font-medium" : ""
+            }`}
+          >
+            Architecture
+          </button>
+          <button
+            type="button"
             onClick={onOpenStats}
             className="hover:text-white transition-colors cursor-pointer inline-flex items-center gap-1.5"
           >
@@ -86,6 +99,16 @@ export const Header: React.FC<HeaderProps> = ({
 
       {mobileOpen && (
         <div className="sm:hidden border-t border-white/10 bg-black px-4 py-3 flex flex-col gap-3 text-sm text-neutral-300">
+          <button
+            type="button"
+            onClick={() => {
+              setMobileOpen(false);
+              onOpenArchitecture();
+            }}
+            className="text-left hover:text-white py-1 cursor-pointer"
+          >
+            Architecture
+          </button>
           <button
             type="button"
             onClick={() => {

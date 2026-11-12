@@ -139,6 +139,7 @@ python scripts/refresh_stale.py --older-than-days 14 --limit 25
 
 ## Documentation
 
+- [docs/Neutron_Architecture_Whitepaper.pdf](docs/Neutron_Architecture_Whitepaper.pdf) ([LaTeX Source](docs/latex/neutron_architecture.tex)) — Official System Design, HLD/LLD & Cloud Architecture Whitepaper
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — Detailed High-Level System Architecture & Data Flows
 - [docs/RENDER_DEPLOY.md](docs/RENDER_DEPLOY.md) — Render Free + GitHub Pages Deployment Guide
 - [PRIVACY.md](PRIVACY.md) — Zero-Telemetry & Privacy Design

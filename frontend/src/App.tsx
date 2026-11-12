@@ -10,6 +10,7 @@ import {
 } from "./components/CrawlProgressDrawer";
 import { StatsDrawer } from "./components/StatsDrawer";
 import { DocumentModal, type ReaderTarget } from "./components/DocumentModal";
+import { ArchitectureView } from "./components/ArchitectureView";
 import type {
   EngineStats,
   GroundedAnswer,
@@ -17,6 +18,7 @@ import type {
   SearchResult,
 } from "./types";
 import { apiUrl, setApiBaseUrl } from "./utils/api";
+import { safeHttpUrl } from "./utils/format";
 
 const SEARCH_MODES: { id: SearchMode; label: string }[] = [
   { id: "all", label: "All" },
@@ -86,6 +88,7 @@ function loadRecent(): string[] {
 }
 
 export function App() {
+  const [view, setView] = useState<"search" | "architecture">("search");
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<SearchMode>("all");
   const [searched, setSearched] = useState(false);
@@ -235,6 +238,7 @@ export function App() {
       setQuery(cleanQuery);
       setActiveQuery(cleanQuery);
       setMode(targetMode);
+      setView("search");
       setSearched(true);
       setCrawling(false);
       setStatusText("");
@@ -454,13 +458,19 @@ export function App() {
         setApiBaseUrl(apiOverride);
         fetchStats();
       }
+      const pageView = (params.get("view") || "").trim().toLowerCase();
       const q = (params.get("q") || "").trim();
       const m = (params.get("mode") || "all") as SearchMode;
       const validMode = SEARCH_MODES.some((sm) => sm.id === m) ? m : "all";
       if (q) {
         runSearch(q, validMode, false);
+      } else if (pageView === "architecture") {
+        stopStream();
+        setView("architecture");
+        setSearched(false);
       } else {
         stopStream();
+        setView("search");
         setSearched(false);
         setQuery("");
         setActiveQuery("");
@@ -483,13 +493,13 @@ export function App() {
       const tag = (e.target as HTMLElement)?.tagName;
       const isTyping = tag === "INPUT" || tag === "TEXTAREA";
 
-      if ((e.key === "/" && !isTyping) || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k")) {
+      if ((e.key === "/" && !isTyping && view === "search") || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k" && view === "search")) {
         e.preventDefault();
         searchInputRef.current?.focus();
         return;
       }
 
-      if (isTyping || readerTarget || statsOpen || !searched || results.length === 0) {
+      if (view !== "search" || isTyping || readerTarget || statsOpen || !searched || results.length === 0) {
         return;
       }
 
@@ -501,16 +511,17 @@ export function App() {
         setSelectedIdx((prev) => Math.max(0, prev - 1));
       } else if (e.key === "Enter" && selectedIdx >= 0 && results[selectedIdx]) {
         e.preventDefault();
-        window.open(results[selectedIdx].url, "_blank", "noopener,noreferrer");
+        window.open(safeHttpUrl(results[selectedIdx].url), "_blank", "noopener,noreferrer");
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [searched, results, selectedIdx, readerTarget, statsOpen]);
+  }, [view, searched, results, selectedIdx, readerTarget, statsOpen]);
 
   const handleGoHome = () => {
     stopStream();
+    setView("search");
     setSearched(false);
     setQuery("");
     setActiveQuery("");
@@ -520,6 +531,15 @@ export function App() {
     setLoading(false);
     setCrawling(false);
     window.history.pushState(null, "", window.location.pathname);
+  };
+
+  const handleOpenArchitecture = () => {
+    stopStream();
+    setView("architecture");
+    setLoading(false);
+    setCrawling(false);
+    window.history.pushState(null, "", "?view=architecture");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handleModeChange = (nextMode: SearchMode) => {
@@ -534,10 +554,17 @@ export function App() {
       <Header
         onGoHome={handleGoHome}
         onOpenStats={() => setStatsOpen(true)}
+        onOpenArchitecture={handleOpenArchitecture}
+        currentView={view}
         pagesIndexed={stats?.pages_indexed}
       />
 
-      {!searched ? (
+      {view === "architecture" ? (
+        <ArchitectureView
+          onBackToSearch={handleGoHome}
+          pagesIndexed={stats?.pages_indexed}
+        />
+      ) : !searched ? (
         <main className="flex-1 flex flex-col items-center justify-center px-4 pb-20">
           <div className="w-full max-w-2xl flex flex-col items-center">
             <h1 className="text-4xl sm:text-5xl font-semibold tracking-tight text-white mb-7">
@@ -707,6 +734,14 @@ export function App() {
 
       <footer className="border-t border-white/[0.08] py-4 px-4 sm:px-6 text-center text-xs text-neutral-500">
         <span>Neutron</span>
+        <span className="mx-2 text-neutral-700">·</span>
+        <button
+          type="button"
+          onClick={handleOpenArchitecture}
+          className="hover:text-neutral-300 transition-colors cursor-pointer"
+        >
+          Architecture
+        </button>
         <span className="mx-2 text-neutral-700">·</span>
         <a href={apiUrl("/privacy")} className="hover:text-neutral-300 transition-colors">
           Privacy
