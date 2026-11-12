@@ -114,7 +114,8 @@ def hash_domain(hostname: str) -> int:
 
 def compute_simhash(text: str) -> int:
     """Calculate a 64-bit Charikar SimHash using weighted unigrams and 2-gram shingles."""
-    tokens = re.findall(r"\b\w{3,}\b", text.lower())
+    # Bound input to leading prose so multi-megabyte pages do not stall the event loop
+    tokens = re.findall(r"\b\w{3,}\b", (text or "")[:12000].lower())
     if not tokens:
         return 0
 

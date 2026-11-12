@@ -286,6 +286,14 @@ class TestLeapcellConnectMicroservices(unittest.IsolatedAsyncioTestCase):
                     )
                     self.assertEqual(s.status_code, 200)
                     self.assertEqual(s.json()["suggestions"], [])
+
+                    st = await http.get(
+                        f"{gw_url}/search/stream",
+                        params={"q": "sql join"},
+                        headers={"Origin": "https://fahiiim.github.io"},
+                    )
+                    self.assertEqual(st.status_code, 200)
+                    self.assertIn("event: backend_error", st.text)
         finally:
             gateway_svc_mod.settings.SEARCH_SERVICE_URL = orig_search_url
             gateway_svc_mod.settings.CRAWLER_SERVICE_URL = orig_crawler_url

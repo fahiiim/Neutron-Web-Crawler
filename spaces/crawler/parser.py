@@ -127,12 +127,16 @@ def is_waf_or_empty_page(title: str, text: str) -> bool:
     return False
 
 
-def extract_outbound_links(tree: HTMLParser, base_url: str) -> List[Dict[str, Any]]:
+def extract_outbound_links(
+    tree: HTMLParser, base_url: str, *, max_links: int = 80
+) -> List[Dict[str, Any]]:
     """Extract and canonicalize followable outbound hyperlink references."""
     links: List[Dict[str, Any]] = []
     seen_urls: Set[str] = set()
 
     for anchor in tree.css("a[href]"):
+        if len(links) >= max_links:
+            break
         rel_raw = (anchor.attributes.get("rel") or "").lower()
         rel_tokens = set(rel_raw.split())
         if rel_tokens & _NOFOLLOW_TOKENS:

@@ -104,8 +104,8 @@ class CrawlerServiceSettings(ServiceBaseSettings):
     BACKGROUND_CRAWLER_ENABLED: bool = False  # Serverless-safe default
     MAX_CONCURRENT_JIT_FETCHES: int = 12
     LIVE_MAX_RETRIES: int = 1
-    LIVE_FETCH_TIMEOUT_SECONDS: float = 3.0
-    LIVE_JIT_DEADLINE_SECONDS: float = 4.8
+    LIVE_FETCH_TIMEOUT_SECONDS: float = 3.5
+    LIVE_JIT_DEADLINE_SECONDS: float = 8.5
     FETCH_TIMEOUT_SECONDS: float = 6.0
     WAF_COOLDOWN_SECONDS: int = 86400
     BLOOM_CAPACITY: int = 1_000_000

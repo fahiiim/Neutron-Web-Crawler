@@ -409,6 +409,20 @@ export function App() {
         }
       });
 
+      es.addEventListener("backend_error", (ev: MessageEvent) => {
+        try {
+          const payload = JSON.parse(ev.data);
+          setErrorMsg(
+            payload?.detail ||
+              "Search services are waking up or temporarily unavailable. Please retry in a few seconds.",
+          );
+        } catch {
+          setErrorMsg(
+            "Search services are waking up or temporarily unavailable. Please retry in a few seconds.",
+          );
+        }
+      });
+
       es.addEventListener("done", () => {
         finished = true;
         setLoading(false);

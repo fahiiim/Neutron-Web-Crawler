@@ -44,6 +44,8 @@ _SYNONYM_GROUPS = {
 _QUESTION_PREFIX_RE = re.compile(
     r"^(what\s+(?:is|are|was|were|does|do|to\s+do\s+to(?:\s+make\s+me)?)\s+(?:the\s+)?(?:(?:name|(?:\w+\s+)?purpose|reason|role|benefit|benefits|meaning|definition|overview|concept)\s+of\s+(?:the\s+)?)?|"
     r"who\s+(?:is|are|was|were|invented|wrote|created)\s+(?:the\s+)?|"
+    r"when\s+(?:was|were|is|are|did|do|will)?\s*|"
+    r"where\s+(?:is|are|was|were|did|do)?\s*|"
     r"how\s+(?:does|do|did|can|to)\s+|"
     r"why\s+(?:does|do|did|is|are)\s+|"
     r"tell\s+me\s+about\s+|"

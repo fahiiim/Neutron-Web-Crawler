@@ -242,6 +242,7 @@ async def _execute_gateway_search(
     crawl_ms = round((time.perf_counter() - crawl_t0) * 1000)
 
     if not search_ok and not live_proto_docs:
+        _maybe_wake_downstream()
         raise HTTPException(
             status_code=503,
             detail=f"Search backend unavailable: {search_err or 'connection failed'}",
@@ -754,6 +755,8 @@ async def search_stream(
         cached_resp = None
         cached_docs: List[Dict[str, Any]] = []
         collected_proto: List[neutron_pb.SearchDocument] = []
+        search_ok = True
+        crawl_ok = True
         index_ms = 0
         crawl_ms = 0
         synth_ms = 0
@@ -769,6 +772,7 @@ async def search_stream(
             collected_proto = list(cached_resp.results)
             index_ms = int(cached_resp.duration_ms)
         except Exception as exc:
+            search_ok = False
             logger.warning("gateway_stream_search_rpc_failed", request_id=req_id, error=str(exc))
 
         yield {
@@ -885,8 +889,21 @@ async def search_stream(
                             ),
                         }
             except Exception as exc:
+                crawl_ok = False
                 logger.warning("gateway_stream_crawler_failed", request_id=req_id, error=str(exc))
             crawl_ms = round((time.perf_counter() - crawl_t0) * 1000)
+
+        if not search_ok and (not should_crawl or not crawl_ok) and not collected_proto:
+            _maybe_wake_downstream()
+            yield {
+                "event": "backend_error",
+                "data": json.dumps(
+                    {
+                        "detail": "Search backend services are waking up or temporarily unavailable. Please retry in a few seconds.",
+                        "request_id": req_id,
+                    }
+                ),
+            }
 
         final_answer: Optional[Dict[str, Any]] = None
         if collected_proto and not await request.is_disconnected():

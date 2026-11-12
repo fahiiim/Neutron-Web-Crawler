@@ -382,6 +382,9 @@ class TestParserAndSecurity(unittest.TestCase):
         self.assertEqual(_strip_question_framing("What is the name of neutron star"), "neutron star")
         self.assertEqual(_strip_question_framing("How to build a crawler"), "build a crawler")
         self.assertEqual(_strip_question_framing("How does CRISPR gene editing work?"), "CRISPR gene editing")
+        self.assertEqual(_strip_question_framing("when bangladesh is established"), "bangladesh is established")
+        self.assertEqual(_strip_question_framing("When was Python created?"), "Python created")
+        self.assertEqual(_strip_question_framing("Where is Turso hosted?"), "Turso hosted")
 
     def test_compute_opic_authority_ranges(self):
         low = crawler_app_module.compute_opic_authority("http://random.site/a/b/c/d", {"text": "short"})
