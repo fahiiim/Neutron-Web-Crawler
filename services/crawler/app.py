@@ -269,6 +269,7 @@ async def health_check() -> Dict[str, Any]:
         "status": "ok",
         "service": "neutron-crawler",
         "version": "3.0.0",
+        "turso_configured": turso_crawler_client.is_configured(),
         "background_crawler_active": bool(_bg_task and not _bg_task.done()),
         "uptime_seconds": int(time.time() - _START_TIME),
     }

@@ -246,6 +246,38 @@ class TestLeapcellConnectMicroservices(unittest.IsolatedAsyncioTestCase):
             gateway_svc_mod.settings.CRAWLER_SERVICE_URL = orig_gw_crawler_url
             gateway_svc_mod.settings.JIT_CACHE_THRESHOLD = orig_gw_threshold
 
+    async def test_gateway_preserves_cors_when_downstream_unavailable(self):
+        orig_search_url = gateway_svc_mod.settings.SEARCH_SERVICE_URL
+        orig_crawler_url = gateway_svc_mod.settings.CRAWLER_SERVICE_URL
+        dead_port_1 = _free_port()
+        dead_port_2 = _free_port()
+        gw_port = _free_port()
+        try:
+            gateway_svc_mod.settings.SEARCH_SERVICE_URL = f"http://127.0.0.1:{dead_port_1}"
+            gateway_svc_mod.settings.CRAWLER_SERVICE_URL = f"http://127.0.0.1:{dead_port_2}"
+            with _LiveUvicornServer(gateway_svc_mod.app, gw_port) as gw_url:
+                async with httpx.AsyncClient(timeout=10.0) as http:
+                    r = await http.get(
+                        f"{gw_url}/search",
+                        params={"q": "sql join"},
+                        headers={"Origin": "https://fahiiim.github.io"},
+                    )
+                    self.assertEqual(r.status_code, 503)
+                    self.assertIn(
+                        r.headers.get("access-control-allow-origin"),
+                        ("*", "https://fahiiim.github.io"),
+                    )
+                    s = await http.get(
+                        f"{gw_url}/suggest",
+                        params={"q": "sql"},
+                        headers={"Origin": "https://fahiiim.github.io"},
+                    )
+                    self.assertEqual(s.status_code, 200)
+                    self.assertEqual(s.json()["suggestions"], [])
+        finally:
+            gateway_svc_mod.settings.SEARCH_SERVICE_URL = orig_search_url
+            gateway_svc_mod.settings.CRAWLER_SERVICE_URL = orig_crawler_url
+
 
 if __name__ == "__main__":
     unittest.main()

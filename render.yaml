@@ -66,14 +66,14 @@ services:
       - key: RPC_TIMEOUT_MS
         value: "55000"
       - key: CORS_ALLOW_ORIGINS
-        value: https://fahiiim.github.io
+        value: https://fahiiim.github.io,http://localhost:5173,http://127.0.0.1:5173
       - key: INTERNAL_API_KEY
         fromService:
           type: web
           name: neutron-search
           envVarKey: INTERNAL_API_KEY
       - key: SEARCH_SERVICE_URL
-        sync: false
+        value: https://neutron-search.onrender.com
       - key: CRAWLER_SERVICE_URL
-        sync: false
+        value: https://neutron-crawler.onrender.com
 

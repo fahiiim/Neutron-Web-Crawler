@@ -133,18 +133,27 @@ async def _execute_gateway_search(
         "record_hot_topic",
     )
 
-    cached_resp = await search_client.query_index(
-        neutron_pb.QueryIndexRequest(
-            query=clean_query,
-            limit=limit,
-            mode=mode,
-            include_markdown=include_markdown,
-        ),
-        headers=headers,
-    )
-    cached_docs = [proto_to_doc(d, include_full_text=False) for d in cached_resp.results]
+    search_ok = True
+    search_err = ""
+    cached_resp = None
+    cached_docs: List[Dict[str, Any]] = []
+    try:
+        cached_resp = await search_client.query_index(
+            neutron_pb.QueryIndexRequest(
+                query=clean_query,
+                limit=limit,
+                mode=mode,
+                include_markdown=include_markdown,
+            ),
+            headers=headers,
+        )
+        cached_docs = [proto_to_doc(d, include_full_text=False) for d in cached_resp.results]
+    except Exception as exc:
+        search_ok = False
+        search_err = str(exc)
+        logger.warning("gateway_search_rpc_failed", error=search_err)
 
-    if len(cached_docs) >= settings.JIT_CACHE_THRESHOLD:
+    if cached_resp is not None and len(cached_docs) >= settings.JIT_CACHE_THRESHOLD:
         return {
             "query": clean_query,
             "mode": mode,
@@ -170,13 +179,23 @@ async def _execute_gateway_search(
     except Exception as exc:
         logger.warning("gateway_crawler_rpc_failed", error=str(exc))
 
+    if not search_ok and not live_proto_docs:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Search backend unavailable: {search_err or 'connection failed'}",
+        )
+
     if not live_proto_docs:
         return {
             "query": clean_query,
             "mode": mode,
             "source": "hybrid_jit",
             "total": len(cached_docs),
-            "answer": proto_to_answer(cached_resp.answer, has_answer=cached_resp.has_answer),
+            "answer": (
+                proto_to_answer(cached_resp.answer, has_answer=cached_resp.has_answer)
+                if cached_resp is not None
+                else None
+            ),
             "results": cached_docs[:limit],
         }
 
@@ -191,23 +210,37 @@ async def _execute_gateway_search(
             combined_proto.append(ld)
 
     combined_proto = combined_proto[:limit]
-    synth_resp = await search_client.synthesize_answer(
-        neutron_pb.SynthesizeAnswerRequest(
-            query=clean_query,
-            documents=combined_proto,
-            include_markdown=include_markdown,
-            max_sentences=settings.SYNTHESIS_MAX_SOURCES,
-        ),
-        headers=headers,
-    )
-    formatted = [proto_to_doc(d, include_full_text=False) for d in synth_resp.results]
+    if search_ok:
+        try:
+            synth_resp = await search_client.synthesize_answer(
+                neutron_pb.SynthesizeAnswerRequest(
+                    query=clean_query,
+                    documents=combined_proto,
+                    include_markdown=include_markdown,
+                    max_sentences=settings.SYNTHESIS_MAX_SOURCES,
+                ),
+                headers=headers,
+            )
+            formatted = [proto_to_doc(d, include_full_text=False) for d in synth_resp.results]
+            return {
+                "query": clean_query,
+                "mode": mode,
+                "source": "hybrid_jit",
+                "total": len(formatted),
+                "answer": proto_to_answer(synth_resp.answer, has_answer=synth_resp.has_answer),
+                "results": formatted,
+            }
+        except Exception as exc:
+            logger.warning("gateway_synth_rpc_failed", error=str(exc))
+
+    fallback_docs = [proto_to_doc(d, include_full_text=False) for d in combined_proto]
     return {
         "query": clean_query,
         "mode": mode,
-        "source": "hybrid_jit",
-        "total": len(formatted),
-        "answer": proto_to_answer(synth_resp.answer, has_answer=synth_resp.has_answer),
-        "results": formatted,
+        "source": "live_fallback",
+        "total": len(fallback_docs),
+        "answer": None,
+        "results": fallback_docs,
     }
 
 
@@ -319,6 +352,15 @@ async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONR
     )
 
 
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.error("gateway_unhandled_exception", path=str(request.url.path), error=str(exc))
+    return JSONResponse(
+        status_code=500,
+        content={"error": "gateway_internal_error", "detail": "Internal gateway error"},
+    )
+
+
 configure_cors(app, settings.cors_origins_list())
 app.add_middleware(_PrivacyHeadersMiddleware)
 mount_connect_service(
@@ -386,20 +428,28 @@ async def stats_endpoint() -> Dict[str, Any]:
 async def suggest_endpoint(
     q: str = Query(..., min_length=2, max_length=64),
 ) -> Dict[str, Any]:
-    resp = await _get_search_client().suggest(
-        neutron_pb.SuggestRequest(query=q, limit=6), headers=_rpc_headers()
-    )
-    return {"query": q, "suggestions": list(resp.suggestions)}
+    try:
+        resp = await _get_search_client().suggest(
+            neutron_pb.SuggestRequest(query=q, limit=6), headers=_rpc_headers()
+        )
+        return {"query": q, "suggestions": list(resp.suggestions)}
+    except Exception as exc:
+        logger.warning("gateway_suggest_rpc_failed", error=str(exc))
+        return {"query": q, "suggestions": []}
 
 
 @app.get("/trending")
 async def trending_endpoint() -> Dict[str, Any]:
-    resp = await _get_search_client().get_trending(
-        neutron_pb.GetTrendingRequest(limit=8), headers=_rpc_headers()
-    )
-    return {
-        "trending": [{"topic": t.topic, "hits": int(t.hits)} for t in resp.trending]
-    }
+    try:
+        resp = await _get_search_client().get_trending(
+            neutron_pb.GetTrendingRequest(limit=8), headers=_rpc_headers()
+        )
+        return {
+            "trending": [{"topic": t.topic, "hits": int(t.hits)} for t in resp.trending]
+        }
+    except Exception as exc:
+        logger.warning("gateway_trending_rpc_failed", error=str(exc))
+        return {"trending": []}
 
 
 @app.get("/doc/{url_hash}")
@@ -413,6 +463,8 @@ async def get_document(url_hash: str) -> Dict[str, Any]:
     except ConnectError as exc:
         status = 400 if exc.code == Code.INVALID_ARGUMENT else 502
         raise HTTPException(status_code=status, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Search backend unavailable: {exc}") from exc
 
     if not resp.found:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -492,21 +544,30 @@ async def search_stream(
     )
 
     async def event_generator() -> AsyncGenerator[Dict[str, str], None]:
-        cached_resp = await search_client.query_index(
-            neutron_pb.QueryIndexRequest(
-                query=clean_query, limit=10, mode=mode, include_markdown=False
-            ),
-            headers=headers,
-        )
-        cached_docs = [proto_to_doc(d, include_full_text=False) for d in cached_resp.results]
-        collected_proto: List[neutron_pb.SearchDocument] = list(cached_resp.results)
+        cached_resp = None
+        cached_docs: List[Dict[str, Any]] = []
+        collected_proto: List[neutron_pb.SearchDocument] = []
+        index_ms = 0
+
+        try:
+            cached_resp = await search_client.query_index(
+                neutron_pb.QueryIndexRequest(
+                    query=clean_query, limit=10, mode=mode, include_markdown=False
+                ),
+                headers=headers,
+            )
+            cached_docs = [proto_to_doc(d, include_full_text=False) for d in cached_resp.results]
+            collected_proto = list(cached_resp.results)
+            index_ms = int(cached_resp.duration_ms)
+        except Exception as exc:
+            logger.warning("gateway_stream_search_rpc_failed", error=str(exc))
 
         yield {
             "event": "cached_results",
             "data": json.dumps(
                 {
                     "count": len(cached_docs),
-                    "duration_ms": int(cached_resp.duration_ms),
+                    "duration_ms": index_ms,
                     "results": cached_docs,
                 }
             ),
@@ -650,7 +711,11 @@ async def search_stream(
 
         if collected_proto and not await request.is_disconnected():
             # Reuse cached synthesis if no live documents were added
-            if len(collected_proto) == len(cached_docs) and cached_resp.has_answer:
+            if (
+                cached_resp is not None
+                and len(collected_proto) == len(cached_docs)
+                and cached_resp.has_answer
+            ):
                 ans = proto_to_answer(cached_resp.answer, has_answer=True)
                 if ans:
                     yield {"event": "answer", "data": json.dumps(ans)}

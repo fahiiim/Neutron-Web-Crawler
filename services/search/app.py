@@ -244,11 +244,12 @@ mount_connect_service(app, _rpc_app)
 @app.get("/health")
 @app.get("/kaithhealth")
 async def health_check() -> Dict[str, Any]:
-    """Health endpoint for Leapcell and container readiness checks."""
+    """Health endpoint for Render/Leapcell and container readiness checks."""
     return {
         "status": "ok",
         "service": "neutron-search",
         "version": "3.0.0",
+        "turso_configured": turso_crawler_client.is_configured(),
         "uptime_seconds": int(time.time() - _START_TIME),
     }
 
