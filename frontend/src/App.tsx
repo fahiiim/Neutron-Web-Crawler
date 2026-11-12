@@ -55,6 +55,7 @@ export function App() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [answer, setAnswer] = useState<GroundedAnswer | null>(null);
   const [loading, setLoading] = useState(false);
+  const [slowWake, setSlowWake] = useState(false);
   const [crawling, setCrawling] = useState(false);
   const [statusText, setStatusText] = useState("");
   const [crawlItems, setCrawlItems] = useState<CrawlItemStatus[]>([]);
@@ -105,6 +106,15 @@ export function App() {
   useEffect(() => {
     fetchStats();
   }, [fetchStats]);
+
+  useEffect(() => {
+    if (!loading || results.length > 0) {
+      setSlowWake(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setSlowWake(true), 4000);
+    return () => window.clearTimeout(timer);
+  }, [loading, results.length]);
 
   const stopStream = useCallback(() => {
     if (eventSourceRef.current) {
@@ -495,7 +505,9 @@ export function App() {
             <div className="flex items-center justify-between text-xs text-neutral-500 mb-3">
               <span>
                 {loading && results.length === 0
-                  ? "Searching..."
+                  ? slowWake
+                    ? "Waking backend services..."
+                    : "Searching..."
                   : `${results.length} ${results.length === 1 ? "result" : "results"}${
                       elapsedMs !== null ? ` · ${(elapsedMs / 1000).toFixed(2)}s` : ""
                     }`}

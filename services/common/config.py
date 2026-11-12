@@ -56,7 +56,7 @@ class GatewayServiceSettings(ServiceBaseSettings):
     SEARCH_SERVICE_URL: str = "http://127.0.0.1:8081"
     CRAWLER_SERVICE_URL: str = "http://127.0.0.1:8082"
     RPC_PROTOCOL: str = "connect"  # connect | grpc_web | grpc
-    RPC_TIMEOUT_MS: int = 8000
+    RPC_TIMEOUT_MS: int = 55000  # Accommodates Render/PaaS free-tier cold starts (~30-50s)
     JIT_CACHE_THRESHOLD: int = 5
     SYNTHESIS_MAX_SOURCES: int = 5
     LIVE_JIT_DEADLINE_SECONDS: float = 4.8

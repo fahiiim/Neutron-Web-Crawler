@@ -38,6 +38,7 @@ from services.common.rpc import (
 settings = GatewayServiceSettings()
 logger = structlog.get_logger("neutron.service.gateway")
 _START_TIME = time.time()
+_LAST_CRAWLER_WAKE_TS = 0.0
 
 
 def _ephemeral_key(request: Request) -> str:
@@ -270,6 +271,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Initialize reusable async ConnectRPC clients backed by pyqwest HTTPTransport."""
     async with HTTPTransport() as transport:
         search_client, crawler_client = _build_clients(transport)
+        app.state._http_client = PyqwestClient(transport=transport)
         app.state._owned_search_client = search_client
         app.state._owned_crawler_client = crawler_client
         try:
@@ -277,6 +279,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         finally:
             await search_client.close()
             await crawler_client.close()
+
+
+async def _wake_crawler_health() -> None:
+    http_client = getattr(app.state, "_http_client", None)
+    base = (settings.CRAWLER_SERVICE_URL or "").strip().rstrip("/")
+    if http_client is None or not base:
+        return
+    try:
+        await http_client.get(f"{base}/health")
+    except Exception:
+        pass
+
+
+def _maybe_wake_crawler() -> None:
+    """Throttled non-blocking ping so sleeping Render/free crawler services start warming."""
+    global _LAST_CRAWLER_WAKE_TS
+    now = time.monotonic()
+    if now - _LAST_CRAWLER_WAKE_TS < 180.0:
+        return
+    _LAST_CRAWLER_WAKE_TS = now
+    _fire_and_log(_wake_crawler_health(), "wake_crawler_health")
 
 
 app = FastAPI(
@@ -333,6 +356,7 @@ async def privacy_endpoint() -> str:
 @app.get("/stats")
 async def stats_endpoint() -> Dict[str, Any]:
     """Return index metrics retrieved via SearchService ConnectRPC."""
+    _maybe_wake_crawler()
     try:
         resp = await _get_search_client().get_stats(
             neutron_pb.GetStatsRequest(), headers=_rpc_headers()

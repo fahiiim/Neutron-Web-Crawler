@@ -1,0 +1,78 @@
+services:
+  - type: web
+    name: neutron-search
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r services/search/requirements.txt
+    startCommand: uvicorn services.search.app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: ENVIRONMENT
+        value: production
+      - key: INTERNAL_API_KEY
+        generateValue: true
+      - key: REQUIRE_INTERNAL_API_KEY
+        value: "true"
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
+
+  - type: web
+    name: neutron-crawler
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r services/crawler/requirements.txt
+    startCommand: uvicorn services.crawler.app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: ENVIRONMENT
+        value: production
+      - key: BACKGROUND_CRAWLER_ENABLED
+        value: "false"
+      - key: INTERNAL_API_KEY
+        fromService:
+          type: web
+          name: neutron-search
+          envVarKey: INTERNAL_API_KEY
+      - key: REQUIRE_INTERNAL_API_KEY
+        value: "true"
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
+
+  - type: web
+    name: neutron-gateway
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r services/gateway/requirements.txt
+    startCommand: uvicorn services.gateway.app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: ENVIRONMENT
+        value: production
+      - key: RPC_PROTOCOL
+        value: connect
+      - key: RPC_TIMEOUT_MS
+        value: "55000"
+      - key: CORS_ALLOW_ORIGINS
+        value: https://fahiiim.github.io
+      - key: INTERNAL_API_KEY
+        fromService:
+          type: web
+          name: neutron-search
+          envVarKey: INTERNAL_API_KEY
+      - key: SEARCH_SERVICE_URL
+        sync: false
+      - key: CRAWLER_SERVICE_URL
+        sync: false
