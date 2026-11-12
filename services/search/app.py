@@ -53,9 +53,11 @@ class SearchServiceImpl:
         mode = (request.mode or "all").strip().lower()
         t0 = time.perf_counter()
 
-        raw_hits = await turso_crawler_client.search(clean_query, limit=limit)
+        # Fetch a wider FTS pool so mode filtering and concept re-ranking retain strong hits
+        fetch_limit = min(50, max(limit * 3, 30) if mode != "all" else max(limit * 2, 25))
+        raw_hits = await turso_crawler_client.search(clean_query, limit=fetch_limit)
         filtered_hits = filter_hits_by_mode(raw_hits, mode)
-        reranked_hits = sort_hits_by_relevance(clean_query, filtered_hits, mode=mode)
+        reranked_hits = sort_hits_by_relevance(clean_query, filtered_hits, mode=mode)[:limit]
         formatted, answer = await attach_synthesis_and_excerpts(
             clean_query,
             reranked_hits,

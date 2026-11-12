@@ -140,7 +140,7 @@ export const StatsDrawer: React.FC<StatsDrawerProps> = ({
               type="url"
               value={endpointInput}
               onChange={(e) => setEndpointInput(e.target.value)}
-              placeholder="https://your-gateway.leapcell.dev"
+              placeholder="https://neutron-gateway.onrender.com"
               className="w-full px-2.5 py-1.5 rounded-md bg-[#0a0a0a] border border-white/15 focus:border-white/40 focus:outline-none text-xs font-mono-tech text-white placeholder:text-neutral-600"
             />
             <div className="flex items-center justify-between gap-2 pt-1">

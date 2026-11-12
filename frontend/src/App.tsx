@@ -381,11 +381,17 @@ export function App() {
       es.addEventListener("live_result", (ev: MessageEvent) => {
         try {
           const doc: SearchResult = JSON.parse(ev.data);
-          if (!latestResults.some((r) => r.url === doc.url)) {
+          const idx = latestResults.findIndex((r) => r.url === doc.url);
+          if (idx >= 0) {
+            latestResults = latestResults.map((r, i) => (i === idx ? doc : r));
+          } else {
             latestResults = [...latestResults, doc];
           }
           setResults((prev) => {
-            if (prev.some((r) => r.url === doc.url)) return prev;
+            const prevIdx = prev.findIndex((r) => r.url === doc.url);
+            if (prevIdx >= 0) {
+              return prev.map((r, i) => (i === prevIdx ? doc : r));
+            }
             return [...prev, doc];
           });
         } catch {
@@ -650,6 +656,7 @@ export function App() {
                     key={`${result.url}-${idx}`}
                     result={result}
                     index={idx}
+                    query={activeQuery}
                     selected={idx === selectedIdx}
                     onOpenReader={(target) => setReaderTarget(target)}
                   />

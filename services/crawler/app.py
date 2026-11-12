@@ -238,11 +238,19 @@ class CrawlerServiceImpl:
                     done, pending = await asyncio.wait(
                         tasks, timeout=settings.LIVE_JIT_DEADLINE_SECONDS
                     )
-                    for p in pending:
-                        p.cancel()
+                    if pending:
+                        for p in pending:
+                            p.cancel()
+                        await asyncio.gather(*pending, return_exceptions=True)
                     for t in done:
                         if not t.cancelled():
                             t.exception()
+                except asyncio.CancelledError:
+                    for t in tasks:
+                        if not t.done():
+                            t.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    raise
                 finally:
                     await event_queue.put(None)
 
@@ -303,8 +311,10 @@ class CrawlerServiceImpl:
                 done, pending = await asyncio.wait(
                     tasks, timeout=settings.LIVE_JIT_DEADLINE_SECONDS
                 )
-                for p in pending:
-                    p.cancel()
+                if pending:
+                    for p in pending:
+                        p.cancel()
+                    await asyncio.gather(*pending, return_exceptions=True)
                 for t in done:
                     try:
                         item = t.result()

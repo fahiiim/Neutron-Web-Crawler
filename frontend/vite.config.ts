@@ -13,7 +13,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          markdown: ['marked', 'dompurify', 'highlight.js'],
+          markdown: ['marked', 'dompurify'],
         },
       },
     },

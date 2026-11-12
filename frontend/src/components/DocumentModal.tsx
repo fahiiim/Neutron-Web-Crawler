@@ -1,6 +1,9 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, ExternalLink, Loader2, X } from "lucide-react";
+import DOMPurify from "dompurify";
+import { marked } from "marked";
 import { apiUrl } from "../utils/api";
+import { safeHttpUrl } from "../utils/format";
 
 export interface ReaderTarget {
   url: string;
@@ -29,92 +32,15 @@ function cleanReaderMarkdown(md: string): string {
     .trim();
 }
 
-function renderMarkdown(markdown: string): React.ReactNode {
-  const lines = cleanReaderMarkdown(markdown).split(/\r?\n/);
-  const nodes: React.ReactNode[] = [];
-  let i = 0;
-
-  while (i < lines.length) {
-    const line = lines[i];
-
-    if (line.trim().startsWith("```")) {
-      const codeLines: string[] = [];
-      i++;
-      while (i < lines.length && !lines[i].trim().startsWith("```")) {
-        codeLines.push(lines[i]);
-        i++;
-      }
-      i++;
-      nodes.push(
-        <pre key={`pre-${i}`}>
-          <code>{codeLines.join("\n")}</code>
-        </pre>,
-      );
-      continue;
-    }
-
-    if (line.startsWith("### ")) {
-      nodes.push(<h3 key={`h3-${i}`}>{line.slice(4)}</h3>);
-      i++;
-      continue;
-    }
-    if (line.startsWith("## ")) {
-      nodes.push(<h2 key={`h2-${i}`}>{line.slice(3)}</h2>);
-      i++;
-      continue;
-    }
-    if (line.startsWith("# ")) {
-      nodes.push(<h1 key={`h1-${i}`}>{line.slice(2)}</h1>);
-      i++;
-      continue;
-    }
-
-    if (line.trim().startsWith("> ")) {
-      nodes.push(
-        <blockquote key={`bq-${i}`}>{line.trim().slice(2)}</blockquote>,
-      );
-      i++;
-      continue;
-    }
-
-    if (/^[-*•]\s+/.test(line.trim())) {
-      const items: string[] = [];
-      while (i < lines.length && /^[-*•]\s+/.test(lines[i].trim())) {
-        items.push(lines[i].trim().replace(/^[-*•]\s+/, ""));
-        i++;
-      }
-      nodes.push(
-        <ul key={`ul-${i}`}>
-          {items.map((it, idx) => (
-            <li key={idx}>{it}</li>
-          ))}
-        </ul>,
-      );
-      continue;
-    }
-
-    if (!line.trim()) {
-      i++;
-      continue;
-    }
-
-    const paraLines: string[] = [line.trim()];
-    i++;
-    while (
-      i < lines.length &&
-      lines[i].trim() &&
-      !lines[i].startsWith("#") &&
-      !lines[i].trim().startsWith("```") &&
-      !lines[i].trim().startsWith("> ") &&
-      !/^[-*•]\s+/.test(lines[i].trim())
-    ) {
-      paraLines.push(lines[i].trim());
-      i++;
-    }
-    nodes.push(<p key={`p-${i}`}>{paraLines.join(" ")}</p>);
-  }
-
-  return nodes;
+function renderSafeMarkdownHtml(markdown: string): string {
+  const cleaned = cleanReaderMarkdown(markdown);
+  if (!cleaned) return "";
+  const rawHtml = marked.parse(cleaned, { gfm: true, breaks: true }) as string;
+  return DOMPurify.sanitize(rawHtml, {
+    USE_PROFILES: { html: true },
+    FORBID_TAGS: ["style", "script", "iframe", "object", "embed", "form", "input"],
+    ALLOWED_URI_REGEXP: /^https?:\/\//i,
+  });
 }
 
 export const DocumentModal: React.FC<DocumentModalProps> = ({
@@ -178,10 +104,16 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
     return () => window.removeEventListener("keydown", onKey);
   }, [target, onClose]);
 
+  const safeHtml = useMemo(
+    () => renderSafeMarkdownHtml(doc?.full_markdown || ""),
+    [doc?.full_markdown],
+  );
+
   if (!target) return null;
 
   const markdownContent = doc?.full_markdown || "";
   const resolvedUrl = doc?.url || target.url;
+  const safeHref = safeHttpUrl(resolvedUrl);
 
   let hostLabel = resolvedUrl;
   try {
@@ -257,7 +189,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
             </button>
 
             <a
-              href={resolvedUrl}
+              href={safeHref}
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md border border-white/10 hover:border-white/30 text-xs text-neutral-300 hover:text-white transition-colors"
@@ -291,7 +223,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
             <div className="py-10 text-center text-sm text-neutral-400">
               <p>{error}</p>
               <a
-                href={resolvedUrl}
+                href={safeHref}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-1.5 mt-3 text-white underline underline-offset-4"
@@ -301,7 +233,10 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
               </a>
             </div>
           ) : (
-            <div className="markdown-prose">{renderMarkdown(markdownContent)}</div>
+            <div
+              className="markdown-prose"
+              dangerouslySetInnerHTML={{ __html: safeHtml }}
+            />
           )}
         </div>
       </div>

@@ -94,6 +94,7 @@ _AUTHORITATIVE_DOMAINS = (
     "wikipedia.org",
     "developer.mozilla.org",
     "docs.python.org",
+    "python.org",
     "postgresql.org",
     "dev.mysql.com",
     "sqlite.org",
@@ -102,6 +103,10 @@ _AUTHORITATIVE_DOMAINS = (
     "geeksforgeeks.org",
     "sqltutorial.org",
     "react.dev",
+    "rust-lang.org",
+    "typescriptlang.org",
+    "go.dev",
+    "arxiv.org",
 )
 
 _BOILERPLATE_PHRASES = (
@@ -110,6 +115,14 @@ _BOILERPLATE_PHRASES = (
     "starter template",
     "fork me on github",
 )
+
+
+def _is_authoritative_host(url: str) -> bool:
+    """Check whether URL belongs to an authoritative reference domain (host or subdomain)."""
+    host = extract_domain_host(url)
+    if not host or host == "unknown":
+        return False
+    return any(host == d or host.endswith(f".{d}") for d in _AUTHORITATIVE_DOMAINS)
 
 
 def _expand_term_variants(term: str) -> Tuple[str, ...]:
@@ -125,6 +138,8 @@ def _expand_term_variants(term: str) -> Tuple[str, ...]:
     elif len(term) >= 5 and term.endswith("ed"):
         stem = term[:-2]
         variants.extend((stem, f"{stem}s", f"{stem}ing"))
+    elif len(term) >= 5 and term.endswith(("ches", "shes", "xes", "zes", "sses")):
+        variants.extend((term[:-2], term[:-1]))
     elif len(term) >= 4 and term.endswith("s") and not term.endswith(("ss", "us", "is")):
         variants.append(term[:-1])
 
@@ -242,8 +257,7 @@ def score_document_relevance(
         if any(phrase in combined_preview for phrase in _BOILERPLATE_PHRASES):
             score -= 4.0
     if matched_terms > 0 and clean_mode in ("all", "encyclopedia"):
-        raw_host = (url or "").lower()
-        if any(domain in raw_host for domain in _AUTHORITATIVE_DOMAINS):
+        if _is_authoritative_host(url or ""):
             score += 1.5
 
     return matched_terms, round(score, 3)

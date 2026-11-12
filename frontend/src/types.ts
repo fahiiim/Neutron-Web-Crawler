@@ -33,8 +33,17 @@ export interface DiscoveryMetric {
 export interface CrawlItemStatus {
   url: string;
   domain: string;
-  status: 'fetching' | 'indexed' | 'blocked' | 'error';
+  title?: string;
+  status: 'pending' | 'success' | 'blocked' | 'error';
+  durationMs?: number;
   detail?: string;
+}
+
+export interface SearchTimings {
+  index_ms: number;
+  crawl_ms: number;
+  synth_ms: number;
+  total_ms: number;
 }
 
 export interface EngineStats {
@@ -43,12 +52,14 @@ export interface EngineStats {
   frontier_pending: number;
   payloads_stored: number;
   connected: boolean;
-  background_crawler_active: boolean;
+  background_crawler_active?: boolean;
   bloom_entries?: number;
   uptime_seconds: number;
 }
 
 export interface TrendingItem {
-  term: string;
-  count: number;
+  topic?: string;
+  hits?: number;
+  term?: string;
+  count?: number;
 }

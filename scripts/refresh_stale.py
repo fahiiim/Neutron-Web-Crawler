@@ -7,12 +7,15 @@ import asyncio
 from typing import Any, Dict, List
 
 from curl_cffi.requests import AsyncSession
+from dotenv import load_dotenv
 
 from spaces.crawler.compression import compress_text
 from spaces.crawler.db_turso import turso_crawler_client
-from spaces.crawler.dedup import compute_simhash, hash_domain
+from spaces.crawler.dedup import compute_simhash, extract_domain_host, hash_domain
 from spaces.crawler.parser import parse_page_content
 from spaces.crawler.robots import robots_manager
+
+load_dotenv()
 
 
 async def fetch_stale_rows(*, older_than_days: int = 14, limit: int = 25) -> List[Dict[str, Any]]:
@@ -31,7 +34,7 @@ async def fetch_stale_rows(*, older_than_days: int = 14, limit: int = 25) -> Lis
         """,
         [modifier, max(1, min(int(limit), 200))],
     )
-    return [dict(row) for row in rs.rows]
+    return [row.asdict() if hasattr(row, "asdict") else dict(row) for row in rs.rows]
 
 
 async def refresh_stale_documents(
@@ -63,7 +66,12 @@ async def refresh_stale_documents(
                         if not await robots_manager.is_allowed(url):
                             return "skipped"
                         resp = await session.get(url, timeout=6.0, allow_redirects=True)
-                        if resp.status_code != 200 or not resp.text:
+                        content_type = (resp.headers.get("content-type") or "").lower()
+                        if (
+                            resp.status_code != 200
+                            or not resp.text
+                            or ("text/html" not in content_type and "application/xhtml" not in content_type)
+                        ):
                             return "failed"
                         parsed = parse_page_content(resp.text, str(resp.url or url))
                         if (
@@ -72,13 +80,15 @@ async def refresh_stale_documents(
                             or len(parsed.get("text") or "") < 120
                         ):
                             return "skipped"
+                        raw_opic = float(row.get("opic_authority") or 0.5)
+                        bounded_opic = round(min(0.95, max(0.1, raw_opic)), 3)
                         ok = await turso_crawler_client.insert_search_index(
                             int(row["url_hash"]),
-                            int(row.get("domain_hash") or hash_domain(url)),
+                            int(row.get("domain_hash") or hash_domain(extract_domain_host(url))),
                             url,
-                            str(parsed.get("title") or row.get("title") or url)[:240],
-                            str(parsed.get("snippet") or "")[:360],
-                            float(row.get("opic_authority") or 1.0),
+                            str(parsed.get("title") or row.get("title") or url)[:200],
+                            str(parsed.get("snippet") or "")[:1200],
+                            bounded_opic,
                             compute_simhash(parsed["text"]),
                             compress_text(parsed["text"]),
                         )

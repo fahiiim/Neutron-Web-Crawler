@@ -6,14 +6,17 @@ Thank you for your interest in contributing to **Neutron**, the real-time decent
 
 ## Architecture Overview
 
-Neutron consists of microservices designed to run on free-tier infrastructure (Hugging Face Spaces + Turso LibSQL):
+Neutron consists of three Python ConnectRPC/FastAPI microservices deployed on Render Free + GitHub Pages + Turso LibSQL:
 
-- `spaces/crawler/` — Unified Search Gateway, SSE streaming coordinator, live JIT crawler, background Mercator politeness worker, and web UI (`templates/index.html`).
-- `spaces/renderer/` — Isolated Playwright headless Chromium worker for JavaScript-heavy Single Page Applications (SPAs).
-- `spaces/gateway/` — Optional standalone gateway microservice for multi-node Docker Compose topologies.
-- `migrations/` — SQLite/LibSQL FTS5 and PostgreSQL database schemas.
-- `scripts/` — CLI search client, DB inspection, environment checker, and Turso migration scripts.
-- `tests/` — Automated unit and integration test suites.
+- `services/gateway/` — Public Edge Gateway (REST + SSE `/search/stream` + ConnectRPC `GatewayService`, TTL caching, `slowapi` rate limiting).
+- `services/search/` — Index Query & Grounded Synthesis microservice (Turso FTS5, re-ranking, optional Gemini synthesis with extractive fallback).
+- `services/crawler/` — On-demand Seed Discovery, `StreamCrawl`, `curl_cffi` fetcher, and `selectolax` HTML-to-Markdown indexer.
+- `spaces/crawler/` — Shared crawler/search core modules (`db_turso`, `discovery`, `parser`, `synthesis`, `robots`, `bloom`, `dedup`).
+- `proto/neutron/v1/` & `neutron_rpc/` — Protobuf contracts and generated ConnectRPC stubs (`scripts/gen_proto.py`).
+- `frontend/` — React 18 + TypeScript + Vite + Tailwind v4 SPA deployed to GitHub Pages.
+- `migrations/` — SQLite/LibSQL FTS5 (`03_turso_fts5_schema.sql`) database schema.
+- `scripts/` — Turso migration, stale document refresh (`refresh_stale.py`), Protobuf stub generation, and diagnostics.
+- `tests/` — Automated unit and live ConnectRPC/SSE integration test suites.
 
 ---
 
@@ -53,12 +56,21 @@ python scripts/init_turso.py
 python -m unittest discover -s tests -v
 ```
 
-### 5. Run the Unified Search & Crawler Service Locally
+### 5. Run the Microservices + Frontend Locally
 ```bash
-cd spaces/crawler
-uvicorn app:app --host 0.0.0.0 --port 7860 --reload
+# Terminal 1 - Search Service
+PORT=8081 uvicorn services.search.app:app --host 127.0.0.1 --port 8081 --reload
+
+# Terminal 2 - Crawler Service
+PORT=8082 uvicorn services.crawler.app:app --host 127.0.0.1 --port 8082 --reload
+
+# Terminal 3 - Edge Gateway
+SEARCH_SERVICE_URL=http://127.0.0.1:8081 CRAWLER_SERVICE_URL=http://127.0.0.1:8082 PORT=8080 uvicorn services.gateway.app:app --host 127.0.0.1 --port 8080 --reload
+
+# Terminal 4 - Frontend Dev Server
+cd frontend && npm install && VITE_API_BASE_URL=http://127.0.0.1:8080 npm run dev
 ```
-Open `http://localhost:7860` in your browser.
+Open `http://localhost:5173` in your browser.
 
 ---
 

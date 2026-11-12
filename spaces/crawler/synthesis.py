@@ -179,6 +179,8 @@ def synthesize_grounded_answer(
     candidates: List[Tuple[float, str, Dict[str, Any]]] = []
 
     for doc_idx, doc in enumerate(docs[:5]):
+        if not str(doc.get("url") or "").strip():
+            continue
         raw_body = str(doc.get("full_text") or doc.get("raw_snippet") or doc.get("snippet") or "")
         sentences = _clean_sentences(raw_body)
 
@@ -409,6 +411,7 @@ def sort_hits_by_relevance(
             h.get("title", ""),
             h.get("snippet", ""),
             h.get("url", ""),
+            body_text=str(h.get("_full_text") or h.get("full_text") or ""),
             mode=mode,
         )
         return (matched, rel_score, float(h.get("score") or 0.0))

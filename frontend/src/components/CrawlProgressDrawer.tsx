@@ -1,14 +1,8 @@
 import React, { useState } from "react";
 import { Check, ChevronDown, ChevronUp, Loader2, Minus } from "lucide-react";
+import type { CrawlItemStatus } from "../types";
 
-export interface CrawlItemStatus {
-  url: string;
-  domain: string;
-  title?: string;
-  status: "pending" | "success" | "blocked" | "error";
-  durationMs?: number;
-  detail?: string;
-}
+export type { CrawlItemStatus };
 
 interface CrawlProgressDrawerProps {
   active: boolean;

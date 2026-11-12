@@ -16,7 +16,9 @@ from spaces.crawler.compression import compress_text, decompress_text
 from spaces.crawler.config import CrawlerSettings
 from spaces.crawler.db_turso import (
     TursoCrawlerClient,
+    _expand_term_variants,
     _format_fts_term,
+    _is_authoritative_host,
     normalize_search_query,
     sanitize_fts_terms,
 )
@@ -742,6 +744,29 @@ class TestAsyncCrawlerModules(unittest.IsolatedAsyncioTestCase):
 class TestFastAPIEndpoints(unittest.TestCase):
     """Integration tests for FastAPI routes, SSE streaming, gateway, and internal auth."""
 
+    def setUp(self):
+        self._p1 = patch.object(
+            crawler_app_module.turso_crawler_client, "is_configured", return_value=False
+        )
+        self._p2 = patch.object(gateway_app_module.turso_client, "connect", AsyncMock())
+        self._p3 = patch.object(gateway_app_module.turso_client, "close", AsyncMock())
+        self._p4 = patch.object(
+            gateway_app_module.turso_client, "get_stats", AsyncMock(return_value={
+                "pages_indexed": 0, "domains_covered": 0, "frontier_pending": 0,
+                "payloads_stored": 0, "connected": False,
+            })
+        )
+        self._p1.start()
+        self._p2.start()
+        self._p3.start()
+        self._p4.start()
+
+    def tearDown(self):
+        self._p4.stop()
+        self._p3.stop()
+        self._p2.stop()
+        self._p1.stop()
+
     def test_public_endpoints_and_security_headers(self):
         with TestClient(crawler_app_module.app) as client:
             health = client.get("/health")
@@ -1018,6 +1043,65 @@ class TestFastAPIEndpoints(unittest.TestCase):
         _, fallback_ans = asyncio.run(_run_fallback())
         self.assertIsNotNone(fallback_ans)
         self.assertEqual(fallback_ans["mode"], "extractive_grounded")
+
+    def test_sibilant_variants_authoritative_host_and_refresh_stale(self):
+        import asyncio
+        import libsql_client
+        from scripts import refresh_stale as refresh_mod
+
+        self.assertIn("index", _expand_term_variants("indexes"))
+        self.assertIn("class", _expand_term_variants("classes"))
+        self.assertIn("search", _expand_term_variants("searches"))
+        self.assertTrue(_is_authoritative_host("https://en.wikipedia.org/wiki/SQL"))
+        self.assertFalse(_is_authoritative_host("https://evil-wikipedia.org/spam"))
+
+        fake_row = libsql_client.Row(
+            {
+                "url_hash": 0,
+                "domain_hash": 1,
+                "canonical_url": 2,
+                "title": 3,
+                "opic_authority": 4,
+                "crawled_at": 5,
+            },
+            (101, 202, "https://docs.example.org/guide", "Old Guide", 0.65, "2025-01-01 00:00:00"),
+        )
+        fake_client = MagicMock()
+        fake_client.is_configured.return_value = True
+        fake_client.connect = AsyncMock()
+        fake_client.close = AsyncMock()
+        inner_conn = AsyncMock()
+        inner_conn.execute = AsyncMock(return_value=MagicMock(rows=[fake_row]))
+        fake_client._ensure_client = AsyncMock(return_value=inner_conn)
+        fake_client.insert_search_index = AsyncMock(return_value=True)
+
+        long_para = "Structured database indexing speeds up lookups across large tables cleanly. " * 10
+        good_html = (
+            f"<html><head><title>Fresh Guide</title></head>"
+            f"<body><article><h1>Fresh Guide</h1><p>{long_para}</p></article></body></html>"
+        )
+        fake_resp = MagicMock(
+            status_code=200,
+            headers={"content-type": "text/html; charset=utf-8"},
+            text=good_html,
+            url="https://docs.example.org/guide",
+        )
+        fake_session = AsyncMock()
+        fake_session.get = AsyncMock(return_value=fake_resp)
+        fake_session.__aenter__ = AsyncMock(return_value=fake_session)
+        fake_session.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch.object(refresh_mod, "turso_crawler_client", fake_client),
+            patch.object(refresh_mod, "AsyncSession", return_value=fake_session),
+            patch.object(refresh_mod.robots_manager, "is_allowed", AsyncMock(return_value=True)),
+        ):
+            summary = asyncio.run(refresh_mod.refresh_stale_documents(older_than_days=7, limit=5))
+
+        self.assertEqual(summary, {"candidates": 1, "refreshed": 1, "skipped": 0, "failed": 0})
+        fake_client.insert_search_index.assert_awaited_once()
+        inserted_snippet = fake_client.insert_search_index.await_args.args[4]
+        self.assertGreater(len(inserted_snippet), 360)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Shared Pydantic settings for Leapcell-ready Neutron microservices."""
+"""Shared Pydantic settings for Neutron microservices (Render & local/PaaS)."""
 
 from __future__ import annotations
 

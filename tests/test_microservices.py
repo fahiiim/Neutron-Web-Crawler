@@ -416,6 +416,39 @@ class TestLeapcellConnectMicroservices(unittest.IsolatedAsyncioTestCase):
                             self.assertEqual(r3.status_code, 200)
                             self.assertFalse(r3.json()["cache_hit"])
                             self.assertGreater(fake_db.search.await_count, calls_after_r1)
+
+                            # refresh=true replaces stale cached URLs when re-crawled cleanly
+                            stale_url = "https://example.org/sql-joins"
+                            fake_db.search.return_value = [
+                                {
+                                    "url_hash": "8801",
+                                    "url": stale_url,
+                                    "title": "Stale Title",
+                                    "snippet": "Outdated SQL join summary.",
+                                    "score": 5.0,
+                                    "crawled_at": "2025-01-01 00:00:00",
+                                }
+                            ]
+                            r4 = await http.get(
+                                f"{gw_url}/search",
+                                params={"q": "sql join", "refresh": "true"},
+                            )
+                            self.assertEqual(r4.status_code, 200)
+                            r4_titles = [res["title"] for res in r4.json()["results"]]
+                            self.assertIn("SQL Join Guide", r4_titles)
+                            self.assertNotIn("Stale Title", r4_titles)
+
+                            # Whitespace-only query on /search/stream closes cleanly without backend errors
+                            ws_stream = await http.get(f"{gw_url}/search/stream", params={"q": "   "})
+                            self.assertEqual(ws_stream.status_code, 200)
+                            self.assertIn("event: done", ws_stream.text)
+
+                            # mode != 'all' fetches a wider FTS candidate pool for vertical filtering
+                            await http.get(
+                                f"{gw_url}/search",
+                                params={"q": "sql join", "mode": "papers"},
+                            )
+                            self.assertGreaterEqual(fake_db.search.await_args.kwargs.get("limit", 0), 30)
         finally:
             search_svc_mod._auth_interceptor._expected_key = orig_search_key
             crawler_svc_mod._auth_interceptor._expected_key = orig_crawler_key

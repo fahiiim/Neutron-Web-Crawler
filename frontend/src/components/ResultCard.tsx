@@ -2,15 +2,22 @@ import React, { useState } from "react";
 import { BookOpen, Check, Copy, ExternalLink } from "lucide-react";
 import type { SearchResult } from "../types";
 import type { ReaderTarget } from "./DocumentModal";
+import {
+  escapeRegex,
+  extractHighlightTerms,
+  formatRelativeTime,
+  safeHttpUrl,
+} from "../utils/format";
 
 interface ResultCardProps {
   result: SearchResult;
   index: number;
+  query?: string;
   selected?: boolean;
   onOpenReader: (target: ReaderTarget) => void;
 }
 
-function sanitizeSnippetHtml(raw: string): string {
+function cleanSnippetText(raw: string): string {
   return raw
     .replace(/\s*\[(?:\d+|citation needed|edit|update)\]/gi, "")
     .replace(/\(\s*\/[^/\n]{2,55}\/(?:\s*(?:ⓘ|listen))?\s*[;,]?\s*/gi, "(")
@@ -20,23 +27,25 @@ function sanitizeSnippetHtml(raw: string): string {
     .trim();
 }
 
-function formatRelativeAge(crawledAt?: string | null): string | null {
-  if (!crawledAt) return null;
-  const isoLike = crawledAt.includes("T") ? crawledAt : `${crawledAt.replace(" ", "T")}Z`;
-  const ts = Date.parse(isoLike);
-  if (Number.isNaN(ts)) return null;
-  const diffSec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
-  if (diffSec < 60) return "just now";
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
-  const days = Math.floor(diffSec / 86400);
-  if (days < 365) return `${days}d ago`;
-  return `${Math.floor(days / 365)}y ago`;
+function renderHighlightedSnippet(text: string, query: string): React.ReactNode {
+  const terms = extractHighlightTerms(query);
+  if (terms.length === 0) {
+    return text;
+  }
+  const pattern = new RegExp(`\\b(${terms.map(escapeRegex).join("|")})\\w*`, "gi");
+  const parts = text.split(pattern);
+  if (parts.length === 1) {
+    return text;
+  }
+  return parts.map((part, i) =>
+    i % 2 === 1 ? <mark key={i}>{part}</mark> : <React.Fragment key={i}>{part}</React.Fragment>,
+  );
 }
 
 export const ResultCard: React.FC<ResultCardProps> = ({
   result,
   index,
+  query = "",
   selected = false,
   onOpenReader,
 }) => {
@@ -61,8 +70,9 @@ export const ResultCard: React.FC<ResultCardProps> = ({
     displayUrl = result.url;
   }
 
-  const safeSnippet = sanitizeSnippetHtml(result.snippet || "");
-  const crawledAge = formatRelativeAge(result.crawled_at);
+  const safeHref = safeHttpUrl(result.url);
+  const safeSnippet = cleanSnippetText(result.snippet || "");
+  const crawledAge = result.crawled_at ? formatRelativeTime(result.crawled_at) : null;
 
   return (
     <article
@@ -86,7 +96,7 @@ export const ResultCard: React.FC<ResultCardProps> = ({
 
       <h3 className="text-[17px] font-medium leading-snug">
         <a
-          href={result.url}
+          href={safeHref}
           target="_blank"
           rel="noreferrer"
           className="text-white hover:underline underline-offset-4 decoration-white/40"
@@ -96,10 +106,9 @@ export const ResultCard: React.FC<ResultCardProps> = ({
       </h3>
 
       {safeSnippet && (
-        <p
-          className="mt-1.5 text-sm leading-relaxed text-neutral-400"
-          dangerouslySetInnerHTML={{ __html: safeSnippet }}
-        />
+        <p className="mt-1.5 text-sm leading-relaxed text-neutral-400">
+          {renderHighlightedSnippet(safeSnippet, query)}
+        </p>
       )}
 
       <div className="mt-2.5 flex items-center gap-4 text-xs text-neutral-500">
@@ -137,7 +146,7 @@ export const ResultCard: React.FC<ResultCardProps> = ({
         </button>
 
         <a
-          href={result.url}
+          href={safeHref}
           target="_blank"
           rel="noreferrer"
           className="inline-flex items-center gap-1 hover:text-white transition-colors"

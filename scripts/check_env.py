@@ -63,7 +63,7 @@ async def main() -> None:
     print("\n" + "=" * 65)
     if turso_ok and key_ok:
         print("  🎉 ALL REQUIRED CHECKS PASSED!")
-        print("  No credit card required. Ready to deploy to Hugging Face Spaces.")
+        print("  No credit card required. Ready to deploy to Render + GitHub Pages.")
     else:
         print("  ⚠️ Please update missing credentials in .env before deploying.")
     print("=" * 65)

@@ -1,4 +1,4 @@
-"""Neutron Public Edge Gateway (REST + SSE + ConnectRPC/gRPC) for Leapcell & GitHub Pages."""
+"""Neutron Public Edge Gateway (REST + SSE + ConnectRPC/gRPC) for Render & GitHub Pages."""
 
 from __future__ import annotations
 
@@ -268,17 +268,24 @@ async def _execute_gateway_search(
             _search_cache.set(cache_key, payload)
         return payload
 
-    # Merge unique hits preserving cached hits first, then synthesize over the combined pool
-    seen_urls = {d.get("url") for d in cached_docs if d.get("url")}
-    combined_proto: List[neutron_pb.SearchDocument] = [
-        doc_to_proto(d, include_full_text=False) for d in cached_docs
-    ]
+    # Merge unique hits, letting fresh live docs replace stale cached entries on refresh
+    live_by_url: Dict[str, neutron_pb.SearchDocument] = {
+        ld.url: ld for ld in live_proto_docs if ld.url
+    }
+    combined_proto: List[neutron_pb.SearchDocument] = []
+    seen_urls: set[str] = set()
+    for d in cached_docs:
+        u = d.get("url")
+        if not u or u in seen_urls:
+            continue
+        seen_urls.add(u)
+        combined_proto.append(live_by_url.get(u) or doc_to_proto(d, include_full_text=False))
     for ld in live_proto_docs:
         if ld.url and ld.url not in seen_urls:
             seen_urls.add(ld.url)
             combined_proto.append(ld)
 
-    combined_proto = combined_proto[:limit]
+    synth_pool = combined_proto[: max(limit, 12)]
     synth_ms = 0
     if search_ok:
         synth_t0 = time.perf_counter()
@@ -286,7 +293,7 @@ async def _execute_gateway_search(
             synth_resp = await search_client.synthesize_answer(
                 neutron_pb.SynthesizeAnswerRequest(
                     query=clean_query,
-                    documents=combined_proto,
+                    documents=synth_pool,
                     include_markdown=include_markdown,
                     max_sentences=settings.SYNTHESIS_MAX_SOURCES,
                 ),
@@ -294,7 +301,7 @@ async def _execute_gateway_search(
             )
             synth_ms = round((time.perf_counter() - synth_t0) * 1000)
             total_ms = round((time.perf_counter() - total_t0) * 1000)
-            formatted = [proto_to_doc(d, include_full_text=False) for d in synth_resp.results]
+            formatted = [proto_to_doc(d, include_full_text=False) for d in synth_resp.results][:limit]
             payload = {
                 "query": clean_query,
                 "mode": mode,
@@ -318,7 +325,7 @@ async def _execute_gateway_search(
             synth_ms = round((time.perf_counter() - synth_t0) * 1000)
             logger.warning("gateway_synth_rpc_failed", request_id=request_id, error=str(exc))
 
-    fallback_docs = [proto_to_doc(d, include_full_text=False) for d in combined_proto]
+    fallback_docs = [proto_to_doc(d, include_full_text=False) for d in combined_proto[:limit]]
     total_ms = round((time.perf_counter() - total_t0) * 1000)
     return {
         "query": clean_query,
@@ -371,7 +378,9 @@ class GatewayServiceImpl:
         ctx: RequestContext,
         /,
     ) -> neutron_pb.SuggestResponse:
-        return await _get_search_client().suggest(request, headers=_rpc_headers())
+        return await _get_search_client().suggest(
+            request, headers=_rpc_headers(ctx.request_headers.get("x-request-id"))
+        )
 
     async def get_stats(
         self,
@@ -379,7 +388,9 @@ class GatewayServiceImpl:
         ctx: RequestContext,
         /,
     ) -> neutron_pb.GetStatsResponse:
-        return await _get_search_client().get_stats(request, headers=_rpc_headers())
+        return await _get_search_client().get_stats(
+            request, headers=_rpc_headers(ctx.request_headers.get("x-request-id"))
+        )
 
     async def get_document(
         self,
@@ -387,7 +398,9 @@ class GatewayServiceImpl:
         ctx: RequestContext,
         /,
     ) -> neutron_pb.GetDocumentResponse:
-        return await _get_search_client().get_document(request, headers=_rpc_headers())
+        return await _get_search_client().get_document(
+            request, headers=_rpc_headers(ctx.request_headers.get("x-request-id"))
+        )
 
 
 def _load_tls_ca_cert() -> bytes | None:
@@ -461,7 +474,7 @@ def _maybe_wake_downstream() -> None:
 
 app = FastAPI(
     title="Neutron Search Edge Gateway",
-    description="Public REST, SSE, and ConnectRPC/gRPC coordinator for Leapcell & GitHub Pages.",
+    description="Public REST, SSE, and ConnectRPC/gRPC coordinator for Render & GitHub Pages.",
     version="3.0.0",
     lifespan=lifespan,
 )
@@ -558,39 +571,43 @@ async def stats_endpoint(request: Request) -> Dict[str, Any]:
 
 @app.get("/suggest")
 async def suggest_endpoint(
+    request: Request,
     q: str = Query(..., min_length=2, max_length=64),
 ) -> Dict[str, Any]:
+    req_id = getattr(request.state, "request_id", None)
     try:
         resp = await _get_search_client().suggest(
-            neutron_pb.SuggestRequest(query=q, limit=6), headers=_rpc_headers()
+            neutron_pb.SuggestRequest(query=q, limit=6), headers=_rpc_headers(req_id)
         )
         return {"query": q, "suggestions": list(resp.suggestions)}
     except Exception as exc:
-        logger.warning("gateway_suggest_rpc_failed", error=str(exc))
+        logger.warning("gateway_suggest_rpc_failed", request_id=req_id, error=str(exc))
         return {"query": q, "suggestions": []}
 
 
 @app.get("/trending")
-async def trending_endpoint() -> Dict[str, Any]:
+async def trending_endpoint(request: Request) -> Dict[str, Any]:
+    req_id = getattr(request.state, "request_id", None)
     try:
         resp = await _get_search_client().get_trending(
-            neutron_pb.GetTrendingRequest(limit=8), headers=_rpc_headers()
+            neutron_pb.GetTrendingRequest(limit=8), headers=_rpc_headers(req_id)
         )
         return {
             "trending": [{"topic": t.topic, "hits": int(t.hits)} for t in resp.trending]
         }
     except Exception as exc:
-        logger.warning("gateway_trending_rpc_failed", error=str(exc))
+        logger.warning("gateway_trending_rpc_failed", request_id=req_id, error=str(exc))
         return {"trending": []}
 
 
 @app.get("/doc/{url_hash}")
-async def get_document(url_hash: str) -> Dict[str, Any]:
+async def get_document(request: Request, url_hash: str) -> Dict[str, Any]:
     """Fetch compressed full document Markdown via SearchService ConnectRPC."""
+    req_id = getattr(request.state, "request_id", None)
     try:
         resp = await _get_search_client().get_document(
             neutron_pb.GetDocumentRequest(url_hash=url_hash),
-            headers=_rpc_headers(),
+            headers=_rpc_headers(req_id),
         )
     except ConnectError as exc:
         status = 400 if exc.code == Code.INVALID_ARGUMENT else 502
@@ -678,6 +695,19 @@ async def search_stream(
     """Stream cached index hits, microservice StreamCrawl progress, and cited synthesis via SSE."""
     clean_query = q.strip()
     req_id = getattr(request.state, "request_id", None) or ""
+    if not clean_query:
+        async def _empty_stream() -> AsyncGenerator[Dict[str, str], None]:
+            yield {
+                "event": "cached_results",
+                "data": json.dumps({"count": 0, "duration_ms": 0, "results": [], "cache_hit": False}),
+            }
+            yield {
+                "event": "done",
+                "data": json.dumps({"completed": True, "cache_hit": False, "request_id": req_id}),
+            }
+
+        return EventSourceResponse(_empty_stream())
+
     search_client = _get_search_client()
     crawler_client = _get_crawler_client()
     headers = _rpc_headers(req_id)
@@ -819,9 +849,16 @@ async def search_stream(
                     elif etype == "crawl_success" and ev.outcome.document.url:
                         oc = ev.outcome
                         pub_doc = proto_to_doc(oc.document, include_full_text=False)
-                        if pub_doc.get("url") not in seen_urls:
-                            seen_urls.add(pub_doc["url"])
-                            collected_proto.append(oc.document)
+                        live_url = pub_doc.get("url")
+                        if live_url:
+                            if live_url not in seen_urls:
+                                seen_urls.add(live_url)
+                                collected_proto.append(oc.document)
+                            else:
+                                collected_proto = [
+                                    oc.document if d.url == live_url else d
+                                    for d in collected_proto
+                                ]
                             added_live = True
                         yield {
                             "event": "crawl_success",
@@ -868,7 +905,7 @@ async def search_stream(
                     synth = await search_client.synthesize_answer(
                         neutron_pb.SynthesizeAnswerRequest(
                             query=clean_query,
-                            documents=collected_proto[: settings.SYNTHESIS_MAX_SOURCES],
+                            documents=collected_proto[: max(12, settings.SYNTHESIS_MAX_SOURCES)],
                             include_markdown=False,
                             max_sentences=settings.SYNTHESIS_MAX_SOURCES,
                         ),
