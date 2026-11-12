@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import socket
 import threading
 import time
@@ -57,6 +58,11 @@ class TestLeapcellConnectMicroservices(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(crawler_svc_mod.settings.PORT, 8080)
         self.assertEqual(search_svc_mod.settings.PORT, 8080)
         self.assertEqual(gateway_svc_mod.settings.PORT, 8080)
+
+        with patch.dict(os.environ, {"RENDER": "true", "SEARCH_SERVICE_URL": ""}, clear=False):
+            cfg = gateway_svc_mod.GatewayServiceSettings()
+            self.assertEqual(cfg.SEARCH_SERVICE_URL, "https://neutron-search.onrender.com")
+            self.assertEqual(cfg.CRAWLER_SERVICE_URL, "https://neutron-crawler.onrender.com")
 
     async def test_end_to_end_gateway_search_crawler_rpc_and_sse(self):
         secret = "test-leapcell-shared-secret"

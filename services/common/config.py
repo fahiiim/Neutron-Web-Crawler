@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from typing import List
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _INSECURE_KEY_PLACEHOLDERS = {
@@ -64,6 +65,26 @@ class GatewayServiceSettings(ServiceBaseSettings):
     RATE_LIMIT_SEARCH: str = "30/minute"
     RATE_LIMIT_STREAM: str = "15/minute"
     RATE_LIMIT_RESEARCH: str = "20/minute"
+
+    @model_validator(mode="after")
+    def _resolve_render_service_urls(self) -> "GatewayServiceSettings":
+        """On Render, fall back to public onrender URLs when service URLs are blank or localhost."""
+        if os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID"):
+            s_url = (self.SEARCH_SERVICE_URL or "").strip()
+            c_url = (self.CRAWLER_SERVICE_URL or "").strip()
+            if (
+                not s_url
+                or s_url.startswith("http://127.0.0.1")
+                or s_url.startswith("http://localhost")
+            ):
+                self.SEARCH_SERVICE_URL = "https://neutron-search.onrender.com"
+            if (
+                not c_url
+                or c_url.startswith("http://127.0.0.1")
+                or c_url.startswith("http://localhost")
+            ):
+                self.CRAWLER_SERVICE_URL = "https://neutron-crawler.onrender.com"
+        return self
 
 
 class SearchServiceSettings(ServiceBaseSettings):
