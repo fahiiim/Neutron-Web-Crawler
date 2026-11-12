@@ -131,8 +131,10 @@ export function App() {
             `/search?q=${encodeURIComponent(cleanQuery)}&mode=${encodeURIComponent(searchMode)}`,
           ),
         );
-        if (!res.ok) throw new Error(`Search failed (${res.status})`);
-        const data = await res.json();
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new Error(data?.detail || `Search failed (${res.status})`);
+        }
         setResults(Array.isArray(data?.results) ? data.results : []);
         setAnswer(data?.answer || null);
         setElapsedMs(Math.round(performance.now() - t0));

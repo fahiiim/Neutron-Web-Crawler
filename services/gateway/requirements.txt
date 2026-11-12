@@ -6,4 +6,5 @@ sse-starlette>=2.1.2
 slowapi>=0.1.9
 structlog>=24.1.0
 connectrpc>=0.13.0
+certifi>=2024.0.0
 

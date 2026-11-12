@@ -20,3 +20,4 @@ mmh3>=4.1.0
 bitarray>=2.9.2
 markdown-it-py>=3.0.0
 connectrpc>=0.13.0
+certifi>=2024.0.0

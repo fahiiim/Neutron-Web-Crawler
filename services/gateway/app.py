@@ -299,10 +299,29 @@ class GatewayServiceImpl:
         return await _get_search_client().get_document(request, headers=_rpc_headers())
 
 
+def _load_tls_ca_cert() -> bytes | None:
+    """Load certifi PEM root CAs so pyqwest verifies HTTPS origins inside containers."""
+    try:
+        import certifi
+
+        with open(certifi.where(), "rb") as fh:
+            return fh.read()
+    except Exception:
+        return None
+
+
+def _build_http_transport() -> HTTPTransport:
+    return HTTPTransport(
+        tls_ca_cert=_load_tls_ca_cert(),
+        tls_include_system_certs=True,
+        timeout=max(10.0, settings.RPC_TIMEOUT_MS / 1000.0),
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Initialize reusable async ConnectRPC clients backed by pyqwest HTTPTransport."""
-    async with HTTPTransport() as transport:
+    async with _build_http_transport() as transport:
         search_client, crawler_client = _build_clients(transport)
         app.state._http_client = PyqwestClient(transport=transport)
         app.state._owned_search_client = search_client

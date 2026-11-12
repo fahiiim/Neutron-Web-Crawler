@@ -68,6 +68,8 @@ class TestLeapcellConnectMicroservices(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(cfg.SEARCH_SERVICE_URL, "https://neutron-search.onrender.com")
             self.assertEqual(cfg.CRAWLER_SERVICE_URL, "https://neutron-crawler.onrender.com")
 
+        self.assertIsNotNone(gateway_svc_mod._load_tls_ca_cert())
+
     async def test_end_to_end_gateway_search_crawler_rpc_and_sse(self):
         secret = "test-leapcell-shared-secret"
         orig_search_key = search_svc_mod.settings.INTERNAL_API_KEY
