@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Check, Copy, ExternalLink, Loader2, X } from "lucide-react";
+import { apiUrl } from "../utils/api";
 
 export interface ReaderTarget {
   url: string;
@@ -146,7 +147,7 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
     setError(null);
     setProgress(0);
 
-    fetch(`/doc/${encodeURIComponent(String(target.urlHash))}`, {
+    fetch(apiUrl(`/doc/${encodeURIComponent(String(target.urlHash))}`), {
       signal: controller.signal,
     })
       .then(async (res) => {

@@ -1,0 +1,207 @@
+syntax = "proto3";
+
+package neutron.v1;
+
+message Citation {
+  int32 index = 1;
+  string url = 2;
+  string url_hash = 3;
+  string title = 4;
+  string domain = 5;
+}
+
+message GroundedAnswer {
+  string summary = 1;
+  repeated Citation citations = 2;
+}
+
+message SearchDocument {
+  string url_hash = 1;
+  string url = 2;
+  string title = 3;
+  string snippet = 4;
+  double score = 5;
+  string crawled_at = 6;
+  string full_markdown = 7;
+  string full_text = 8;
+}
+
+message StatsSnapshot {
+  int64 pages_indexed = 1;
+  int64 domains_covered = 2;
+  int64 frontier_pending = 3;
+  int64 payloads_stored = 4;
+  bool connected = 5;
+}
+
+message DiscoveryMetric {
+  string source = 1;
+  int32 urls_found = 2;
+  int32 duration_ms = 3;
+  string status = 4;
+  string error = 5;
+}
+
+message CrawlOutcome {
+  bool ok = 1;
+  bool robots_blocked = 2;
+  string error = 3;
+  string domain = 4;
+  int32 duration_ms = 5;
+  SearchDocument document = 6;
+}
+
+message QueryIndexRequest {
+  string query = 1;
+  int32 limit = 2;
+  string mode = 3;
+  bool include_markdown = 4;
+}
+
+message QueryIndexResponse {
+  repeated SearchDocument results = 1;
+  GroundedAnswer answer = 2;
+  int32 duration_ms = 3;
+  bool has_answer = 4;
+}
+
+message SynthesizeAnswerRequest {
+  string query = 1;
+  repeated SearchDocument documents = 2;
+  bool include_markdown = 3;
+  int32 max_sentences = 4;
+}
+
+message SynthesizeAnswerResponse {
+  repeated SearchDocument results = 1;
+  GroundedAnswer answer = 2;
+  bool has_answer = 3;
+}
+
+message GetDocumentRequest {
+  string url_hash = 1;
+}
+
+message GetDocumentResponse {
+  bool found = 1;
+  string url_hash = 2;
+  string url = 3;
+  string title = 4;
+  string crawled_at = 5;
+  string full_markdown = 6;
+  string source = 7;
+}
+
+message SuggestRequest {
+  string query = 1;
+  int32 limit = 2;
+}
+
+message SuggestResponse {
+  string query = 1;
+  repeated string suggestions = 2;
+}
+
+message GetTrendingRequest {
+  int32 limit = 1;
+}
+
+message TrendingTopic {
+  string topic = 1;
+  int64 hits = 2;
+}
+
+message GetTrendingResponse {
+  repeated TrendingTopic trending = 1;
+}
+
+message GetStatsRequest {}
+
+message GetStatsResponse {
+  StatsSnapshot stats = 1;
+}
+
+message RecordHotTopicRequest {
+  string query = 1;
+}
+
+message RecordHotTopicResponse {
+  bool ok = 1;
+}
+
+message DiscoverAndCrawlRequest {
+  string query = 1;
+  int32 max_pages = 2;
+  string mode = 3;
+  repeated string skip_urls = 4;
+  bool include_full_text = 5;
+}
+
+message DiscoverAndCrawlResponse {
+  repeated SearchDocument documents = 1;
+  repeated DiscoveryMetric metrics = 2;
+}
+
+message DiscoverSeedsRequest {
+  string query = 1;
+  int32 max_urls = 2;
+  string mode = 3;
+}
+
+message DiscoverSeedsResponse {
+  repeated string urls = 1;
+  repeated DiscoveryMetric metrics = 2;
+}
+
+message CrawlUrlRequest {
+  string url = 1;
+  string query = 2;
+  bool fast_live = 3;
+  bool include_full_text = 4;
+  bool check_robots = 5;
+}
+
+message CrawlUrlResponse {
+  CrawlOutcome outcome = 1;
+}
+
+message GatewaySearchRequest {
+  string query = 1;
+  int32 limit = 2;
+  string mode = 3;
+  bool include_markdown = 4;
+}
+
+message GatewaySearchResponse {
+  string query = 1;
+  string mode = 2;
+  string source = 3;
+  int32 total = 4;
+  GroundedAnswer answer = 5;
+  bool has_answer = 6;
+  repeated SearchDocument results = 7;
+}
+
+service SearchService {
+  rpc QueryIndex(QueryIndexRequest) returns (QueryIndexResponse);
+  rpc SynthesizeAnswer(SynthesizeAnswerRequest) returns (SynthesizeAnswerResponse);
+  rpc GetDocument(GetDocumentRequest) returns (GetDocumentResponse);
+  rpc Suggest(SuggestRequest) returns (SuggestResponse);
+  rpc GetTrending(GetTrendingRequest) returns (GetTrendingResponse);
+  rpc GetStats(GetStatsRequest) returns (GetStatsResponse);
+  rpc RecordHotTopic(RecordHotTopicRequest) returns (RecordHotTopicResponse);
+}
+
+service CrawlerService {
+  rpc DiscoverAndCrawl(DiscoverAndCrawlRequest) returns (DiscoverAndCrawlResponse);
+  rpc DiscoverSeeds(DiscoverSeedsRequest) returns (DiscoverSeedsResponse);
+  rpc CrawlUrl(CrawlUrlRequest) returns (CrawlUrlResponse);
+}
+
+service GatewayService {
+  rpc Search(GatewaySearchRequest) returns (GatewaySearchResponse);
+  rpc Suggest(SuggestRequest) returns (SuggestResponse);
+  rpc GetStats(GetStatsRequest) returns (GetStatsResponse);
+  rpc GetDocument(GetDocumentRequest) returns (GetDocumentResponse);
+}
+

@@ -1,8 +1,4 @@
-"""Neutron Unified Search Gateway & Crawler Worker (FastAPI + Gradio).
-
-Combines the public search engine UI, API coordinator, real-time JIT crawler,
-and background Mercator politeness crawler into a hardened microservice.
-"""
+"""Neutron Unified Search Engine & Crawler Microservice (FastAPI)."""
 
 import asyncio
 from contextlib import asynccontextmanager
@@ -11,35 +7,6 @@ import json
 import time
 from typing import Any, AsyncGenerator, Coroutine, Dict, List, Optional, Set, Tuple
 import urllib.parse
-
-try:
-    import spaces
-
-    @spaces.GPU
-    def _zero_gpu_guard() -> str:
-        """Hugging Face ZeroGPU requirement guard."""
-        return "Neutron Search Engine Online"
-except Exception:
-    def _zero_gpu_guard() -> str:
-        return "Neutron Search Engine Online"
-
-
-def _notify_zerogpu_startup() -> None:
-    """Trigger ZeroGPU startup report when running inside a ZeroGPU container."""
-    try:
-        import spaces.zero
-
-        if hasattr(spaces.zero, "startup"):
-            spaces.zero.startup()
-        else:
-            import spaces.zero.client as zero_client
-
-            zero_client.startup_report()
-    except Exception:
-        pass
-
-
-_notify_zerogpu_startup()
 
 from curl_cffi.requests import AsyncSession
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
@@ -50,11 +17,6 @@ from fastapi.templating import Jinja2Templates
 import httpx
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
-
-try:
-    import gradio as gr
-except ImportError:
-    gr = None  # Allows running pure FastAPI / unit tests without Gradio
 
 try:
     from .bloom import URLBloomFilter
@@ -74,7 +36,13 @@ try:
     from .parser import is_waf_or_empty_page, parse_page_content
     from .robots import robots_manager
     from .sitemap import discover_sitemap_urls
-    from .synthesis import extract_query_focused_snippet, synthesize_grounded_answer
+    from .synthesis import (
+        MODE_DOMAINS,
+        attach_synthesis_and_excerpts,
+        extract_query_focused_snippet,
+        filter_hits_by_mode,
+        sort_hits_by_relevance,
+    )
 except ImportError:
     from bloom import URLBloomFilter
     from compression import compress_text, decompress_text
@@ -93,7 +61,13 @@ except ImportError:
     from parser import is_waf_or_empty_page, parse_page_content
     from robots import robots_manager
     from sitemap import discover_sitemap_urls
-    from synthesis import extract_query_focused_snippet, synthesize_grounded_answer
+    from synthesis import (
+        MODE_DOMAINS,
+        attach_synthesis_and_excerpts,
+        extract_query_focused_snippet,
+        filter_hits_by_mode,
+        sort_hits_by_relevance,
+    )
 
 import os
 
@@ -272,7 +246,6 @@ async def _warm_bloom_filter() -> None:
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage lifecycle: DB initialization, Bloom warm-up, and background worker."""
     global _bg_worker_task
-    _notify_zerogpu_startup()
 
     if settings.REQUIRE_INTERNAL_API_KEY and not settings.INTERNAL_API_KEY:
         raise RuntimeError(
@@ -421,26 +394,12 @@ async def privacy_endpoint() -> str:
     )
 
 
-_MODE_DOMAINS: Dict[str, Tuple[str, ...]] = {
-    "encyclopedia": ("wikipedia.org", "britannica.com", "stanford.edu"),
-    "papers": ("arxiv.org", "acm.org", "ieee.org", "nature.com", "sciencedirect.com", "biorxiv.org"),
-    "code": ("github.com", "gitlab.com", "stackoverflow.com", "python.org", "rust-lang.org", "docs."),
-    "discussions": ("reddit.com", "ycombinator.com", "lobste.rs", "dev.to"),
-}
+_MODE_DOMAINS = MODE_DOMAINS
 
 
 def _filter_hits_by_mode(hits: List[Dict[str, Any]], mode: str) -> List[Dict[str, Any]]:
     """Optionally narrow indexed cache hits to vertical domains when a filter mode is active."""
-    clean_mode = (mode or "all").lower()
-    suffixes = _MODE_DOMAINS.get(clean_mode)
-    if not suffixes:
-        return hits
-    filtered: List[Dict[str, Any]] = []
-    for item in hits:
-        host = extract_domain_host(str(item.get("url") or ""))
-        if any(s in host for s in suffixes):
-            filtered.append(item)
-    return filtered
+    return filter_hits_by_mode(hits, mode)
 
 
 async def _attach_synthesis_and_excerpts(
@@ -449,55 +408,14 @@ async def _attach_synthesis_and_excerpts(
     include_markdown: bool = False,
 ) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Hydrate top docs from Turso payloads if needed, synthesize an answer, and format snippets."""
-    top_docs = docs[: settings.SYNTHESIS_MAX_SOURCES]
-    missing_hashes: List[int] = []
-    for doc in top_docs:
-        if not doc.get("_full_text"):
-            raw_hash = doc.get("url_hash")
-            try:
-                if raw_hash is not None:
-                    missing_hashes.append(int(raw_hash))
-            except (TypeError, ValueError):
-                continue
-
-    payloads_map: Dict[int, bytes] = {}
-    if missing_hashes:
-        payloads_map = await turso_crawler_client.get_payloads_map(missing_hashes)
-
-    synthesis_inputs: List[Dict[str, Any]] = []
-    for doc in top_docs:
-        full_txt = doc.get("_full_text") or ""
-        if not full_txt:
-            try:
-                raw_bytes = payloads_map.get(int(doc.get("url_hash", 0)))
-                if raw_bytes:
-                    full_txt = decompress_text(raw_bytes)
-            except (TypeError, ValueError):
-                full_txt = ""
-        synthesis_inputs.append(
-            {
-                "url_hash": str(doc.get("url_hash") or ""),
-                "url": doc.get("url") or "",
-                "title": doc.get("title") or "",
-                "raw_snippet": doc.get("snippet") or "",
-                "full_text": full_txt,
-            }
-        )
-
-    answer = synthesize_grounded_answer(query, synthesis_inputs, max_sentences=4)
-
-    formatted_docs: List[Dict[str, Any]] = []
-    payload_lookup = {s["url"]: s["full_text"] for s in synthesis_inputs}
-    for doc in docs:
-        clean_doc = {k: v for k, v in doc.items() if k != "_full_text"}
-        raw_snip = str(clean_doc.get("snippet") or "")
-        body_for_excerpt = str(doc.get("_full_text") or payload_lookup.get(clean_doc.get("url", ""), "") or raw_snip)
-        clean_doc["snippet"] = extract_query_focused_snippet(query, body_for_excerpt, max_len=320) or raw_snip[:320]
-        if include_markdown:
-            clean_doc["full_markdown"] = body_for_excerpt
-        formatted_docs.append(clean_doc)
-
-    return formatted_docs, answer
+    return await attach_synthesis_and_excerpts(
+        query,
+        docs,
+        include_markdown=include_markdown,
+        max_sources=settings.SYNTHESIS_MAX_SOURCES,
+        get_payloads_map=turso_crawler_client.get_payloads_map,
+        decompress_fn=decompress_text,
+    )
 
 
 async def _execute_unified_search(
@@ -570,19 +488,7 @@ async def _execute_unified_search(
             seen_urls.add(url)
             merged.append(hit)
 
-    merged.sort(
-        key=lambda h: (
-            score_document_relevance(
-                clean_query,
-                h.get("title", ""),
-                h.get("snippet", ""),
-                h.get("url", ""),
-            )[0],
-            float(h.get("score") or 0.0),
-        ),
-        reverse=True,
-    )
-
+    merged = sort_hits_by_relevance(clean_query, merged)
     trimmed = merged[:limit]
     formatted, answer = await _attach_synthesis_and_excerpts(
         clean_query, trimmed, include_markdown=include_markdown
@@ -1185,22 +1091,6 @@ async def background_politeness_worker() -> None:
         except Exception as exc:
             logger.warning("background_worker_warning", error=str(exc), exc_info=True)
             await asyncio.sleep(5.0)
-
-
-if gr is not None:
-    with gr.Blocks(title="Neutron Engine Explorer") as demo:
-        gr.Markdown("# Neutron Real-Time Search Engine")
-        gr.Markdown("Unified search gateway and crawler worker.")
-        gr.Markdown("Open the root [URL](/) to use the web search interface.")
-
-        with gr.Row():
-            status_box = gr.Textbox(value="Initializing...", label="Cluster Status")
-            status_btn = gr.Button("Refresh Status")
-
-        status_btn.click(fn=_zero_gpu_guard, inputs=[], outputs=[status_box])
-        demo.load(fn=_zero_gpu_guard, inputs=[], outputs=[status_box])
-
-    app = gr.mount_gradio_app(app, demo, path="/gradio")
 
 
 if __name__ == "__main__":

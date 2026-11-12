@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ArrowRight, History, Loader2, Search, X } from "lucide-react";
+import { apiUrl } from "../utils/api";
 
 interface SearchBarProps {
   query: string;
@@ -54,7 +55,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({
     const timer = window.setTimeout(async () => {
       try {
         const res = await fetch(
-          `/suggest?q=${encodeURIComponent(trimmed)}&limit=6`,
+          apiUrl(`/suggest?q=${encodeURIComponent(trimmed)}&limit=6`),
           { signal: controller.signal },
         );
         if (!res.ok) return;

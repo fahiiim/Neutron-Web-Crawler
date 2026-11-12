@@ -28,8 +28,8 @@ jobs:
 
       - name: Syntax & Critical Lint Checks
         run: |
-          python -m compileall -q spaces scripts tests
-          ruff check --select E9,F63,F7,F82 spaces scripts tests
+          python -m compileall -q spaces services scripts tests neutron_rpc
+          ruff check --select E9,F63,F7,F82,F401 spaces services scripts tests
 
       - name: Set up Node.js & Build React Frontend
         uses: actions/setup-node@v4
@@ -51,7 +51,7 @@ jobs:
   database-migration:
     name: Apply Turso Database Migrations
     needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') && secrets.TURSO_DATABASE_URL != '' && secrets.TURSO_AUTH_TOKEN != ''
     runs-on: ubuntu-latest
     env:
       TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
@@ -72,71 +72,3 @@ jobs:
       - name: Run Schema Migration Against Turso
         run: |
           python scripts/init_turso.py
-
-  deploy-huggingface:
-    name: Deploy to Hugging Face Spaces
-    needs: database-migration
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Python for Deployment
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Set up Node.js & Build React Frontend
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Build React SPA Bundle for Spaces
-        run: |
-          cd frontend
-          npm ci
-          npm run build
-
-      - name: Install Deployment Dependencies
-        run: pip install "huggingface_hub<1.0.0"
-
-      - name: Deploy Microservices via Hugging Face Hub API
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          HF_USERNAME: ${{ secrets.HF_USERNAME || 'fahiiim' }}
-          COMMIT_SHA: ${{ github.sha }}
-        run: |
-          python -c "
-          import os
-          from huggingface_hub import HfApi
-
-          token = os.environ.get('HF_TOKEN')
-          if not token:
-              raise ValueError('Missing HF_TOKEN repository secret')
-
-          username = os.environ.get('HF_USERNAME', 'fahiiim')
-          sha = os.environ.get('COMMIT_SHA', 'latest')[:7]
-          api = HfApi(token=token)
-
-          print(f'Deploying Stealth Renderer to {username}/Neutron_Renderer...')
-          api.upload_folder(
-              folder_path='spaces/renderer',
-              repo_id=f'{username}/Neutron_Renderer',
-              repo_type='space',
-              delete_patterns=['*.pyc', '__pycache__/*', '.git/*', 'main.py'],
-              commit_message=f'ci: automated deployment from commit {sha}'
-          )
-
-          print(f'Deploying Unified Crawler to {username}/Neutron_Crawler...')
-          api.upload_folder(
-              folder_path='spaces/crawler',
-              repo_id=f'{username}/Neutron_Crawler',
-              repo_type='space',
-              delete_patterns=['*.pyc', '__pycache__/*', '.git/*', 'static/ui-assets/*', 'storage_r2.py'],
-              commit_message=f'ci: automated deployment from commit {sha}'
-          )
-          print('All Hugging Face microservices synced successfully.')
-          "

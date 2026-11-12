@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { RefreshCw, X } from "lucide-react";
 import type { EngineStats } from "../types";
+import { getApiBaseUrl, setApiBaseUrl } from "../utils/api";
 
 interface StatsDrawerProps {
   open: boolean;
@@ -16,9 +17,12 @@ export const StatsDrawer: React.FC<StatsDrawerProps> = ({
   onRefresh,
 }) => {
   const [refreshing, setRefreshing] = useState(false);
+  const [endpointInput, setEndpointInput] = useState(getApiBaseUrl);
+  const [savedNotice, setSavedNotice] = useState(false);
 
   useEffect(() => {
     if (!open) return;
+    setEndpointInput(getApiBaseUrl());
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
@@ -35,6 +39,14 @@ export const StatsDrawer: React.FC<StatsDrawerProps> = ({
     } finally {
       window.setTimeout(() => setRefreshing(false), 300);
     }
+  };
+
+  const handleSaveEndpoint = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setApiBaseUrl(endpointInput);
+    setSavedNotice(true);
+    window.setTimeout(() => setSavedNotice(false), 1600);
+    await handleRefresh();
   };
 
   const metrics = [
@@ -107,11 +119,42 @@ export const StatsDrawer: React.FC<StatsDrawerProps> = ({
           </div>
 
           <div className="bg-black border border-white/10 rounded-lg p-4 flex items-center justify-between text-xs">
-            <span className="text-neutral-400">Database connection</span>
+            <span className="text-neutral-400">Gateway status</span>
             <span className="font-mono-tech text-neutral-200">
               {stats?.connected === false ? "Disconnected" : "Connected"}
             </span>
           </div>
+
+          <form
+            onSubmit={handleSaveEndpoint}
+            className="bg-black border border-white/10 rounded-lg p-4 space-y-2.5"
+          >
+            <label
+              htmlFor="neutron-api-endpoint"
+              className="block text-xs text-neutral-400"
+            >
+              Backend Gateway URL
+            </label>
+            <input
+              id="neutron-api-endpoint"
+              type="url"
+              value={endpointInput}
+              onChange={(e) => setEndpointInput(e.target.value)}
+              placeholder="https://your-gateway.leapcell.dev"
+              className="w-full px-2.5 py-1.5 rounded-md bg-[#0a0a0a] border border-white/15 focus:border-white/40 focus:outline-none text-xs font-mono-tech text-white placeholder:text-neutral-600"
+            />
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <span className="text-[11px] text-neutral-500">
+                {savedNotice ? "Saved" : "Leave blank for same origin"}
+              </span>
+              <button
+                type="submit"
+                className="px-2.5 py-1 rounded-md bg-white text-black text-xs font-medium hover:bg-neutral-200 transition-colors cursor-pointer"
+              >
+                Apply
+              </button>
+            </div>
+          </form>
         </div>
       </div>
     </div>

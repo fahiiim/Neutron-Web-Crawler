@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Menu, X } from "lucide-react";
+import { apiUrl } from "../utils/api";
 
 interface HeaderProps {
   onGoHome: () => void;
@@ -60,11 +61,11 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             )}
           </button>
-          <a href="/privacy" className="hover:text-white transition-colors">
+          <a href={apiUrl("/privacy")} className="hover:text-white transition-colors">
             Privacy
           </a>
           <a
-            href="/docs"
+            href={apiUrl("/docs")}
             target="_blank"
             rel="noreferrer"
             className="hover:text-white transition-colors"
@@ -99,14 +100,14 @@ export const Header: React.FC<HeaderProps> = ({
               : ""}
           </button>
           <a
-            href="/privacy"
+            href={apiUrl("/privacy")}
             onClick={() => setMobileOpen(false)}
             className="hover:text-white py-1"
           >
             Privacy
           </a>
           <a
-            href="/docs"
+            href={apiUrl("/docs")}
             target="_blank"
             rel="noreferrer"
             onClick={() => setMobileOpen(false)}

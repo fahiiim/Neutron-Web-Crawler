@@ -1,13 +1,25 @@
 """Query-focused excerpt extraction and extractive grounded answer synthesis."""
 
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 import urllib.parse
 
 try:
-    from .db_turso import _term_matches_text, normalize_search_query, sanitize_fts_terms
+    from .db_turso import (
+        _term_matches_text,
+        normalize_search_query,
+        sanitize_fts_terms,
+        score_document_relevance,
+    )
+    from .dedup import extract_domain_host
 except ImportError:
-    from db_turso import _term_matches_text, normalize_search_query, sanitize_fts_terms
+    from db_turso import (
+        _term_matches_text,
+        normalize_search_query,
+        sanitize_fts_terms,
+        score_document_relevance,
+    )
+    from dedup import extract_domain_host
 
 _PROTECT_WORDS_RE = re.compile(
     r"\b(?:Dr|Mr|Mrs|Ms|Prof|Sr|Jr|St|vs|etc|Fig|No|al|e\.g|i\.e|U\.S)\.",
@@ -238,3 +250,124 @@ def synthesize_grounded_answer(
         "citations": citations,
         "mode": "extractive_grounded",
     }
+
+
+MODE_DOMAINS: Dict[str, Tuple[str, ...]] = {
+    "encyclopedia": ("wikipedia.org", "britannica.com", "stanford.edu"),
+    "papers": (
+        "arxiv.org",
+        "acm.org",
+        "ieee.org",
+        "nature.com",
+        "sciencedirect.com",
+        "biorxiv.org",
+    ),
+    "code": (
+        "github.com",
+        "gitlab.com",
+        "stackoverflow.com",
+        "python.org",
+        "rust-lang.org",
+        "docs.",
+    ),
+    "discussions": ("reddit.com", "ycombinator.com", "lobste.rs", "dev.to"),
+}
+
+
+def filter_hits_by_mode(hits: List[Dict[str, Any]], mode: str) -> List[Dict[str, Any]]:
+    """Optionally narrow indexed cache hits to vertical domains when a mode is active."""
+    clean_mode = (mode or "all").lower()
+    suffixes = MODE_DOMAINS.get(clean_mode)
+    if not suffixes:
+        return hits
+    filtered: List[Dict[str, Any]] = []
+    for item in hits:
+        host = extract_domain_host(str(item.get("url") or ""))
+        if any(s in host for s in suffixes):
+            filtered.append(item)
+    return filtered
+
+
+def sort_hits_by_relevance(clean_query: str, hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Sort search hits descending by query-relevance signal then OPIC/BM25 score."""
+    return sorted(
+        hits,
+        key=lambda h: (
+            score_document_relevance(
+                clean_query,
+                h.get("title", ""),
+                h.get("snippet", ""),
+                h.get("url", ""),
+            )[0],
+            float(h.get("score") or 0.0),
+        ),
+        reverse=True,
+    )
+
+
+async def attach_synthesis_and_excerpts(
+    query: str,
+    docs: List[Dict[str, Any]],
+    *,
+    include_markdown: bool = False,
+    max_sources: int = 5,
+    get_payloads_map: Optional[Callable[[List[int]], Awaitable[Dict[int, bytes]]]] = None,
+    decompress_fn: Optional[Callable[[bytes], Optional[str]]] = None,
+) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Hydrate top docs from payload storage if needed, synthesize answer, and format snippets."""
+    top_docs = docs[:max_sources]
+    missing_hashes: List[int] = []
+    for doc in top_docs:
+        if not doc.get("_full_text"):
+            raw_hash = doc.get("url_hash")
+            try:
+                if raw_hash is not None and str(raw_hash).strip():
+                    missing_hashes.append(int(raw_hash))
+            except (TypeError, ValueError):
+                continue
+
+    payloads_map: Dict[int, bytes] = {}
+    if missing_hashes and get_payloads_map is not None:
+        payloads_map = await get_payloads_map(missing_hashes)
+
+    synthesis_inputs: List[Dict[str, Any]] = []
+    for doc in top_docs:
+        full_txt = str(doc.get("_full_text") or "")
+        if not full_txt and decompress_fn is not None:
+            try:
+                raw_bytes = payloads_map.get(int(doc.get("url_hash", 0)))
+                if raw_bytes:
+                    full_txt = decompress_fn(raw_bytes) or ""
+            except (TypeError, ValueError):
+                full_txt = ""
+        synthesis_inputs.append(
+            {
+                "url_hash": str(doc.get("url_hash") or ""),
+                "url": doc.get("url") or "",
+                "title": doc.get("title") or "",
+                "raw_snippet": doc.get("snippet") or "",
+                "full_text": full_txt,
+            }
+        )
+
+    answer = synthesize_grounded_answer(query, synthesis_inputs, max_sentences=4)
+
+    formatted_docs: List[Dict[str, Any]] = []
+    payload_lookup = {s["url"]: s["full_text"] for s in synthesis_inputs}
+    for doc in docs:
+        clean_doc = {k: v for k, v in doc.items() if k != "_full_text"}
+        raw_snip = str(clean_doc.get("snippet") or "")
+        body_for_excerpt = str(
+            doc.get("_full_text")
+            or payload_lookup.get(clean_doc.get("url", ""), "")
+            or raw_snip
+        )
+        clean_doc["snippet"] = (
+            extract_query_focused_snippet(query, body_for_excerpt, max_len=320)
+            or _sanitize_prose(raw_snip)[:320]
+        )
+        if include_markdown:
+            clean_doc["full_markdown"] = body_for_excerpt
+        formatted_docs.append(clean_doc)
+
+    return formatted_docs, answer

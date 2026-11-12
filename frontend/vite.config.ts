@@ -4,9 +4,9 @@ import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  base: '/',
+  base: process.env.VITE_BASE_PATH || '/',
   build: {
-    outDir: '../spaces/crawler/static',
+    outDir: process.env.VITE_OUT_DIR || '../spaces/crawler/static',
     emptyOutDir: true,
     assetsDir: 'ui-assets',
     sourcemap: false,
@@ -20,14 +20,14 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://localhost:7860',
-      '/search': 'http://localhost:7860',
-      '/doc': 'http://localhost:7860',
-      '/trending': 'http://localhost:7860',
-      '/suggest': 'http://localhost:7860',
-      '/stats': 'http://localhost:7860',
-      '/health': 'http://localhost:7860',
-      '/privacy': 'http://localhost:7860',
+      '/api': 'http://localhost:8080',
+      '/search': 'http://localhost:8080',
+      '/doc': 'http://localhost:8080',
+      '/trending': 'http://localhost:8080',
+      '/suggest': 'http://localhost:8080',
+      '/stats': 'http://localhost:8080',
+      '/health': 'http://localhost:8080',
+      '/privacy': 'http://localhost:8080',
     },
   },
 });

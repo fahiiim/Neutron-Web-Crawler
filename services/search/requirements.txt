@@ -1,0 +1,10 @@
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.7.0
+pydantic-settings>=2.2.0
+libsql-client>=0.3.0
+zstandard>=0.22.0
+xxhash>=3.4.1
+slowapi>=0.1.9
+structlog>=24.1.0
+connectrpc>=0.13.0

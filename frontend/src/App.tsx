@@ -15,6 +15,7 @@ import type {
   SearchMode,
   SearchResult,
 } from "./types";
+import { apiUrl, setApiBaseUrl } from "./utils/api";
 
 const SEARCH_MODES: { id: SearchMode; label: string }[] = [
   { id: "all", label: "All" },
@@ -92,7 +93,7 @@ export function App() {
 
   const fetchStats = useCallback(async () => {
     try {
-      const res = await fetch("/stats");
+      const res = await fetch(apiUrl("/stats"));
       if (!res.ok) return;
       const data = await res.json();
       setStats(data);
@@ -116,7 +117,9 @@ export function App() {
     async (cleanQuery: string, searchMode: SearchMode, t0: number) => {
       try {
         const res = await fetch(
-          `/search?q=${encodeURIComponent(cleanQuery)}&mode=${encodeURIComponent(searchMode)}`,
+          apiUrl(
+            `/search?q=${encodeURIComponent(cleanQuery)}&mode=${encodeURIComponent(searchMode)}`,
+          ),
         );
         if (!res.ok) throw new Error(`Search failed (${res.status})`);
         const data = await res.json();
@@ -166,7 +169,9 @@ export function App() {
         window.history.pushState(null, "", `?${params.toString()}`);
       }
 
-      const streamUrl = `/search/stream?q=${encodeURIComponent(cleanQuery)}&mode=${encodeURIComponent(targetMode)}`;
+      const streamUrl = apiUrl(
+        `/search/stream?q=${encodeURIComponent(cleanQuery)}&mode=${encodeURIComponent(targetMode)}`,
+      );
       const es = new EventSource(streamUrl);
       eventSourceRef.current = es;
       let finished = false;
@@ -316,6 +321,11 @@ export function App() {
   useEffect(() => {
     const syncFromUrl = () => {
       const params = new URLSearchParams(window.location.search);
+      const apiOverride = (params.get("api") || "").trim();
+      if (apiOverride) {
+        setApiBaseUrl(apiOverride);
+        fetchStats();
+      }
       const q = (params.get("q") || "").trim();
       const m = (params.get("mode") || "all") as SearchMode;
       const validMode = SEARCH_MODES.some((sm) => sm.id === m) ? m : "all";
@@ -381,7 +391,7 @@ export function App() {
     setErrorMsg(null);
     setLoading(false);
     setCrawling(false);
-    window.history.pushState(null, "", "/");
+    window.history.pushState(null, "", window.location.pathname);
   };
 
   const handleModeChange = (nextMode: SearchMode) => {
@@ -556,12 +566,12 @@ export function App() {
       <footer className="border-t border-white/[0.08] py-4 px-4 sm:px-6 text-center text-xs text-neutral-500">
         <span>Neutron</span>
         <span className="mx-2 text-neutral-700">·</span>
-        <a href="/privacy" className="hover:text-neutral-300 transition-colors">
+        <a href={apiUrl("/privacy")} className="hover:text-neutral-300 transition-colors">
           Privacy
         </a>
         <span className="mx-2 text-neutral-700">·</span>
         <a
-          href="/docs"
+          href={apiUrl("/docs")}
           target="_blank"
           rel="noreferrer"
           className="hover:text-neutral-300 transition-colors"
