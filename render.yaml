@@ -76,3 +76,4 @@ services:
         sync: false
       - key: CRAWLER_SERVICE_URL
         sync: false
+
