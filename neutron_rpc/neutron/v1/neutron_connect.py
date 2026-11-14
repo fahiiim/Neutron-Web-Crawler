@@ -19,7 +19,7 @@ from connectrpc.server import ConnectASGIApplication, ConnectWSGIApplication, DE
 from protobuf import DescService
 
 from . import neutron_pb
-from .neutron_pb import CrawlStreamEvent, CrawlUrlRequest, CrawlUrlResponse, DiscoverAndCrawlRequest, DiscoverAndCrawlResponse, DiscoverSeedsRequest, DiscoverSeedsResponse, GatewaySearchRequest, GatewaySearchResponse, GetDocumentRequest, GetDocumentResponse, GetStatsRequest, GetStatsResponse, GetTrendingRequest, GetTrendingResponse, QueryIndexRequest, QueryIndexResponse, RecordHotTopicRequest, RecordHotTopicResponse, StreamCrawlRequest, SuggestRequest, SuggestResponse, SynthesizeAnswerRequest, SynthesizeAnswerResponse
+from .neutron_pb import BatchGetDocumentsRequest, BatchGetDocumentsResponse, CrawlStreamEvent, CrawlUrlRequest, CrawlUrlResponse, DiscoverAndCrawlRequest, DiscoverAndCrawlResponse, DiscoverSeedsRequest, DiscoverSeedsResponse, FindSimilarRequest, FindSimilarResponse, GatewaySearchRequest, GatewaySearchResponse, GetDocumentRequest, GetDocumentResponse, GetStatsRequest, GetStatsResponse, GetTrendingRequest, GetTrendingResponse, QueryIndexRequest, QueryIndexResponse, RecordHotTopicRequest, RecordHotTopicResponse, StreamCrawlRequest, SuggestRequest, SuggestResponse, SynthesizeAnswerRequest, SynthesizeAnswerResponse
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Iterable, Iterator, Mapping
@@ -38,6 +38,12 @@ class SearchService(Protocol):
         raise ConnectError(Code.UNIMPLEMENTED, 'Not implemented')
 
     async def get_document(self, request: GetDocumentRequest, ctx: RequestContext[GetDocumentRequest, GetDocumentResponse], /) -> GetDocumentResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, 'Not implemented')
+
+    async def batch_get_documents(self, request: BatchGetDocumentsRequest, ctx: RequestContext[BatchGetDocumentsRequest, BatchGetDocumentsResponse], /) -> BatchGetDocumentsResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, 'Not implemented')
+
+    async def find_similar(self, request: FindSimilarRequest, ctx: RequestContext[FindSimilarRequest, FindSimilarResponse], /) -> FindSimilarResponse:
         raise ConnectError(Code.UNIMPLEMENTED, 'Not implemented')
 
     async def suggest(self, request: SuggestRequest, ctx: RequestContext[SuggestRequest, SuggestResponse], /) -> SuggestResponse:
@@ -102,6 +108,28 @@ class SearchServiceASGIApplication(ConnectASGIApplication[SearchService]):
                         stream_type=StreamType.UNARY,
                     ),
                     function=svc.get_document,
+                ),
+                "/neutron.v1.SearchService/BatchGetDocuments": Endpoint.unary(
+                    method=MethodInfo(
+                        name="BatchGetDocuments",
+                        service_name="neutron.v1.SearchService",
+                        input=BatchGetDocumentsRequest,
+                        output=BatchGetDocumentsResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                        stream_type=StreamType.UNARY,
+                    ),
+                    function=svc.batch_get_documents,
+                ),
+                "/neutron.v1.SearchService/FindSimilar": Endpoint.unary(
+                    method=MethodInfo(
+                        name="FindSimilar",
+                        service_name="neutron.v1.SearchService",
+                        input=FindSimilarRequest,
+                        output=FindSimilarResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                        stream_type=StreamType.UNARY,
+                    ),
+                    function=svc.find_similar,
                 ),
                 "/neutron.v1.SearchService/Suggest": Endpoint.unary(
                     method=MethodInfo(
@@ -221,6 +249,46 @@ class SearchServiceClient(ConnectClient):
             headers=headers,
             timeout_ms=timeout_ms,
         )
+    async def batch_get_documents(
+        self,
+        request: BatchGetDocumentsRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None, 
+        timeout_ms: int | None = None,
+    ) -> BatchGetDocumentsResponse:
+        return await self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="BatchGetDocuments",
+                service_name="neutron.v1.SearchService",
+                input=BatchGetDocumentsRequest,
+                output=BatchGetDocumentsResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+                stream_type=StreamType.UNARY,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+    async def find_similar(
+        self,
+        request: FindSimilarRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None, 
+        timeout_ms: int | None = None,
+    ) -> FindSimilarResponse:
+        return await self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="FindSimilar",
+                service_name="neutron.v1.SearchService",
+                input=FindSimilarRequest,
+                output=FindSimilarResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+                stream_type=StreamType.UNARY,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
     async def suggest(
         self,
         request: SuggestRequest,
@@ -312,6 +380,12 @@ class SearchServiceSync(Protocol):
     def get_document(self, request: GetDocumentRequest, ctx: RequestContext[GetDocumentRequest, GetDocumentResponse], /) -> GetDocumentResponse:
         raise ConnectError(Code.UNIMPLEMENTED, 'Not implemented')
 
+    def batch_get_documents(self, request: BatchGetDocumentsRequest, ctx: RequestContext[BatchGetDocumentsRequest, BatchGetDocumentsResponse], /) -> BatchGetDocumentsResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, 'Not implemented')
+
+    def find_similar(self, request: FindSimilarRequest, ctx: RequestContext[FindSimilarRequest, FindSimilarResponse], /) -> FindSimilarResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, 'Not implemented')
+
     def suggest(self, request: SuggestRequest, ctx: RequestContext[SuggestRequest, SuggestResponse], /) -> SuggestResponse:
         raise ConnectError(Code.UNIMPLEMENTED, 'Not implemented')
 
@@ -372,6 +446,28 @@ class SearchServiceWSGIApplication(ConnectWSGIApplication):
                         stream_type=StreamType.UNARY,
                     ),
                     function=service.get_document,
+                ),
+                "/neutron.v1.SearchService/BatchGetDocuments": EndpointSync.unary(
+                    method=MethodInfo(
+                        name="BatchGetDocuments",
+                        service_name="neutron.v1.SearchService",
+                        input=BatchGetDocumentsRequest,
+                        output=BatchGetDocumentsResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                        stream_type=StreamType.UNARY,
+                    ),
+                    function=service.batch_get_documents,
+                ),
+                "/neutron.v1.SearchService/FindSimilar": EndpointSync.unary(
+                    method=MethodInfo(
+                        name="FindSimilar",
+                        service_name="neutron.v1.SearchService",
+                        input=FindSimilarRequest,
+                        output=FindSimilarResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                        stream_type=StreamType.UNARY,
+                    ),
+                    function=service.find_similar,
                 ),
                 "/neutron.v1.SearchService/Suggest": EndpointSync.unary(
                     method=MethodInfo(
@@ -485,6 +581,46 @@ class SearchServiceClientSync(ConnectClientSync):
                 service_name="neutron.v1.SearchService",
                 input=GetDocumentRequest,
                 output=GetDocumentResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+                stream_type=StreamType.UNARY,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+    def batch_get_documents(
+        self,
+        request: BatchGetDocumentsRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None, 
+        timeout_ms: int | None = None,
+    ) -> BatchGetDocumentsResponse:
+        return self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="BatchGetDocuments",
+                service_name="neutron.v1.SearchService",
+                input=BatchGetDocumentsRequest,
+                output=BatchGetDocumentsResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+                stream_type=StreamType.UNARY,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+    def find_similar(
+        self,
+        request: FindSimilarRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None, 
+        timeout_ms: int | None = None,
+    ) -> FindSimilarResponse:
+        return self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="FindSimilar",
+                service_name="neutron.v1.SearchService",
+                input=FindSimilarRequest,
+                output=FindSimilarResponse,
                 idempotency_level=IdempotencyLevel.UNKNOWN,
                 stream_type=StreamType.UNARY,
             ),
@@ -912,6 +1048,12 @@ class GatewayService(Protocol):
     async def search(self, request: GatewaySearchRequest, ctx: RequestContext[GatewaySearchRequest, GatewaySearchResponse], /) -> GatewaySearchResponse:
         raise ConnectError(Code.UNIMPLEMENTED, 'Not implemented')
 
+    async def batch_get_documents(self, request: BatchGetDocumentsRequest, ctx: RequestContext[BatchGetDocumentsRequest, BatchGetDocumentsResponse], /) -> BatchGetDocumentsResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, 'Not implemented')
+
+    async def find_similar(self, request: FindSimilarRequest, ctx: RequestContext[FindSimilarRequest, FindSimilarResponse], /) -> FindSimilarResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, 'Not implemented')
+
     async def suggest(self, request: SuggestRequest, ctx: RequestContext[SuggestRequest, SuggestResponse], /) -> SuggestResponse:
         raise ConnectError(Code.UNIMPLEMENTED, 'Not implemented')
 
@@ -949,6 +1091,28 @@ class GatewayServiceASGIApplication(ConnectASGIApplication[GatewayService]):
                         stream_type=StreamType.UNARY,
                     ),
                     function=svc.search,
+                ),
+                "/neutron.v1.GatewayService/BatchGetDocuments": Endpoint.unary(
+                    method=MethodInfo(
+                        name="BatchGetDocuments",
+                        service_name="neutron.v1.GatewayService",
+                        input=BatchGetDocumentsRequest,
+                        output=BatchGetDocumentsResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                        stream_type=StreamType.UNARY,
+                    ),
+                    function=svc.batch_get_documents,
+                ),
+                "/neutron.v1.GatewayService/FindSimilar": Endpoint.unary(
+                    method=MethodInfo(
+                        name="FindSimilar",
+                        service_name="neutron.v1.GatewayService",
+                        input=FindSimilarRequest,
+                        output=FindSimilarResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                        stream_type=StreamType.UNARY,
+                    ),
+                    function=svc.find_similar,
                 ),
                 "/neutron.v1.GatewayService/Suggest": Endpoint.unary(
                     method=MethodInfo(
@@ -1011,6 +1175,46 @@ class GatewayServiceClient(ConnectClient):
                 service_name="neutron.v1.GatewayService",
                 input=GatewaySearchRequest,
                 output=GatewaySearchResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+                stream_type=StreamType.UNARY,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+    async def batch_get_documents(
+        self,
+        request: BatchGetDocumentsRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None, 
+        timeout_ms: int | None = None,
+    ) -> BatchGetDocumentsResponse:
+        return await self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="BatchGetDocuments",
+                service_name="neutron.v1.GatewayService",
+                input=BatchGetDocumentsRequest,
+                output=BatchGetDocumentsResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+                stream_type=StreamType.UNARY,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+    async def find_similar(
+        self,
+        request: FindSimilarRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None, 
+        timeout_ms: int | None = None,
+    ) -> FindSimilarResponse:
+        return await self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="FindSimilar",
+                service_name="neutron.v1.GatewayService",
+                input=FindSimilarRequest,
+                output=FindSimilarResponse,
                 idempotency_level=IdempotencyLevel.UNKNOWN,
                 stream_type=StreamType.UNARY,
             ),
@@ -1082,6 +1286,12 @@ class GatewayServiceSync(Protocol):
     def search(self, request: GatewaySearchRequest, ctx: RequestContext[GatewaySearchRequest, GatewaySearchResponse], /) -> GatewaySearchResponse:
         raise ConnectError(Code.UNIMPLEMENTED, 'Not implemented')
 
+    def batch_get_documents(self, request: BatchGetDocumentsRequest, ctx: RequestContext[BatchGetDocumentsRequest, BatchGetDocumentsResponse], /) -> BatchGetDocumentsResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, 'Not implemented')
+
+    def find_similar(self, request: FindSimilarRequest, ctx: RequestContext[FindSimilarRequest, FindSimilarResponse], /) -> FindSimilarResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, 'Not implemented')
+
     def suggest(self, request: SuggestRequest, ctx: RequestContext[SuggestRequest, SuggestResponse], /) -> SuggestResponse:
         raise ConnectError(Code.UNIMPLEMENTED, 'Not implemented')
 
@@ -1117,6 +1327,28 @@ class GatewayServiceWSGIApplication(ConnectWSGIApplication):
                         stream_type=StreamType.UNARY,
                     ),
                     function=service.search,
+                ),
+                "/neutron.v1.GatewayService/BatchGetDocuments": EndpointSync.unary(
+                    method=MethodInfo(
+                        name="BatchGetDocuments",
+                        service_name="neutron.v1.GatewayService",
+                        input=BatchGetDocumentsRequest,
+                        output=BatchGetDocumentsResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                        stream_type=StreamType.UNARY,
+                    ),
+                    function=service.batch_get_documents,
+                ),
+                "/neutron.v1.GatewayService/FindSimilar": EndpointSync.unary(
+                    method=MethodInfo(
+                        name="FindSimilar",
+                        service_name="neutron.v1.GatewayService",
+                        input=FindSimilarRequest,
+                        output=FindSimilarResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                        stream_type=StreamType.UNARY,
+                    ),
+                    function=service.find_similar,
                 ),
                 "/neutron.v1.GatewayService/Suggest": EndpointSync.unary(
                     method=MethodInfo(
@@ -1179,6 +1411,46 @@ class GatewayServiceClientSync(ConnectClientSync):
                 service_name="neutron.v1.GatewayService",
                 input=GatewaySearchRequest,
                 output=GatewaySearchResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+                stream_type=StreamType.UNARY,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+    def batch_get_documents(
+        self,
+        request: BatchGetDocumentsRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None, 
+        timeout_ms: int | None = None,
+    ) -> BatchGetDocumentsResponse:
+        return self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="BatchGetDocuments",
+                service_name="neutron.v1.GatewayService",
+                input=BatchGetDocumentsRequest,
+                output=BatchGetDocumentsResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+                stream_type=StreamType.UNARY,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+    def find_similar(
+        self,
+        request: FindSimilarRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None, 
+        timeout_ms: int | None = None,
+    ) -> FindSimilarResponse:
+        return self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="FindSimilar",
+                service_name="neutron.v1.GatewayService",
+                input=FindSimilarRequest,
+                output=FindSimilarResponse,
                 idempotency_level=IdempotencyLevel.UNKNOWN,
                 stream_type=StreamType.UNARY,
             ),

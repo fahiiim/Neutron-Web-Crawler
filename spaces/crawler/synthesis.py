@@ -165,6 +165,73 @@ def extract_query_focused_snippet(query: str, text: str, max_len: int = 320) -> 
     return excerpt
 
 
+def extract_query_highlights(
+    query: str,
+    text: str,
+    num_highlights: int = 2,
+    max_chars_per_highlight: int = 250,
+) -> List[str]:
+    """Extract Exa-style query-conditioned salient sentences directly answering the query."""
+    clean_full = _sanitize_prose(" ".join((text or "").split()))
+    if not clean_full:
+        return []
+
+    terms = sanitize_fts_terms(query)
+    sentences = [s for s in _clean_sentences(text) if len(s) >= 25]
+    if not sentences:
+        if len(clean_full) > 30:
+            trimmed = (
+                clean_full
+                if len(clean_full) <= max_chars_per_highlight
+                else clean_full[:max_chars_per_highlight].rsplit(" ", 1)[0] + "..."
+            )
+            return [trimmed]
+        return []
+
+    if not terms:
+        return [
+            s if len(s) <= max_chars_per_highlight else s[:max_chars_per_highlight].rsplit(" ", 1)[0] + "..."
+            for s in sentences[:num_highlights]
+        ]
+
+    scored: List[Tuple[float, int, str]] = []
+    for idx, sent in enumerate(sentences[:40]):
+        low = sent.lower()
+        words = re.findall(r"[a-z0-9]+", low)
+        if not words:
+            continue
+        term_matches = sum(1 for t in terms if _term_matches_text(t, low))
+        if term_matches == 0:
+            continue
+
+        density = term_matches / max(1, len(words))
+        pos_weight = 1.0 / (1.0 + (idx * 0.05))
+        score = (term_matches * 3.0) + (density * 10.0) + pos_weight
+        scored.append((score, idx, sent))
+
+    if not scored:
+        return [
+            s if len(s) <= max_chars_per_highlight else s[:max_chars_per_highlight].rsplit(" ", 1)[0] + "..."
+            for s in sentences[:num_highlights]
+        ]
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    selected: List[str] = []
+    for _, _, candidate in scored:
+        if len(selected) >= num_highlights:
+            break
+        if any(_token_jaccard(candidate, existing) > 0.6 for existing in selected):
+            continue
+        trimmed = (
+            candidate
+            if len(candidate) <= max_chars_per_highlight
+            else candidate[:max_chars_per_highlight].rsplit(" ", 1)[0] + "..."
+        )
+        selected.append(trimmed)
+
+    return selected or [sentences[0][:max_chars_per_highlight]]
+
+
 def synthesize_grounded_answer(
     query: str,
     docs: List[Dict[str, Any]],
@@ -492,6 +559,9 @@ async def attach_synthesis_and_excerpts(
         clean_doc["snippet"] = (
             extract_query_focused_snippet(query, body_for_excerpt, max_len=320)
             or _sanitize_prose(raw_snip)[:320]
+        )
+        clean_doc["highlights"] = extract_query_highlights(
+            query, body_for_excerpt, num_highlights=2
         )
         if include_markdown:
             clean_doc["full_markdown"] = body_for_excerpt

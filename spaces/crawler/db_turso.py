@@ -8,11 +8,11 @@ import libsql_client
 
 try:
     from .config import settings
-    from .dedup import extract_domain_host, hamming_distance
+    from .dedup import extract_domain_host, hamming_distance, hash_domain, hash_url
     from .logging_utils import get_logger
 except ImportError:
     from config import settings
-    from dedup import extract_domain_host, hamming_distance
+    from dedup import extract_domain_host, hamming_distance, hash_domain, hash_url
     from logging_utils import get_logger
 
 logger = get_logger("neutron.db")
@@ -309,13 +309,37 @@ class TursoCrawlerClient:
             await self.connect()
         return self._client
 
-    async def _execute_fts(self, fts_pattern: str, limit: int) -> List[Dict[str, Any]]:
-        """Run an FTS5 MATCH query with BM25 ranking."""
+    async def _execute_fts(
+        self,
+        fts_pattern: str,
+        limit: int,
+        include_domains: Optional[List[str]] = None,
+        exclude_domains: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Run an FTS5 MATCH query with BM25 ranking and optional domain inclusion/exclusion."""
         client = await self._ensure_client()
         if client is None:
             return []
 
-        sql = """
+        where_clauses = ["search_fts MATCH ?"]
+        params: List[Any] = [fts_pattern]
+
+        if include_domains:
+            inc_hashes = [hash_domain(extract_domain_host(d)) for d in include_domains if d and extract_domain_host(d)]
+            if inc_hashes:
+                placeholders = ",".join("?" for _ in inc_hashes)
+                where_clauses.append(f"s.domain_hash IN ({placeholders})")
+                params.extend(inc_hashes)
+
+        if exclude_domains:
+            exc_hashes = [hash_domain(extract_domain_host(d)) for d in exclude_domains if d and extract_domain_host(d)]
+            if exc_hashes:
+                placeholders = ",".join("?" for _ in exc_hashes)
+                where_clauses.append(f"s.domain_hash NOT IN ({placeholders})")
+                params.extend(exc_hashes)
+
+        params.append(limit)
+        sql = f"""
         SELECT
             s.url_hash,
             s.domain_hash,
@@ -327,12 +351,12 @@ class TursoCrawlerClient:
             bm25(search_fts, 4.0, 1.5, 0.5) AS bm25_rank
         FROM search_fts f
         JOIN search_index s ON f.rowid = s.url_hash
-        WHERE search_fts MATCH ?
+        WHERE {" AND ".join(where_clauses)}
         ORDER BY bm25_rank ASC, s.opic_authority DESC
         LIMIT ?;
         """
         try:
-            result_set = await client.execute(sql, [fts_pattern, limit])
+            result_set = await client.execute(sql, params)
             results: List[Dict[str, Any]] = []
             for row in result_set.rows:
                 rank_score = round(
@@ -355,14 +379,25 @@ class TursoCrawlerClient:
             logger.warning("turso_fts_query_failed", pattern=fts_pattern, error=str(exc))
             return []
 
-    async def search(self, query: str, limit: int = 15) -> List[Dict[str, Any]]:
+    async def search(
+        self,
+        query: str,
+        limit: int = 15,
+        include_domains: Optional[List[str]] = None,
+        exclude_domains: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
         """Execute high-precision stemmed AND -> multi-term quorum FTS5 search."""
         terms = sanitize_fts_terms(query)
         if not terms:
             return []
 
         and_pattern = " AND ".join(_format_fts_term(term) for term in terms)
-        hits = await self._execute_fts(and_pattern, limit)
+        hits = await self._execute_fts(
+            and_pattern,
+            limit,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
+        )
 
         # For 4+ terms, allow high-threshold quorum (>= 70%, min 3 terms) for typo resilience
         if len(terms) >= 4 and len(hits) < limit:
@@ -372,7 +407,12 @@ class TursoCrawlerClient:
                 "(" + " AND ".join(_format_fts_term(t) for t in comb) + ")"
                 for comb in itertools.combinations(core, quorum)
             ]
-            quorum_hits = await self._execute_fts(" OR ".join(quorum_clauses), limit)
+            quorum_hits = await self._execute_fts(
+                " OR ".join(quorum_clauses),
+                limit,
+                include_domains=include_domains,
+                exclude_domains=exclude_domains,
+            )
             seen_hashes = {h["url_hash"] for h in hits}
             for item in quorum_hits:
                 if item["url_hash"] not in seen_hashes:
@@ -380,6 +420,49 @@ class TursoCrawlerClient:
                     seen_hashes.add(item["url_hash"])
 
         return hits[:limit]
+
+    async def find_similar_documents(
+        self,
+        url: str,
+        limit: int = 5,
+        exclude_source_domain: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """Find structurally & semantically similar documents using SimHash and keyword matching."""
+        client = await self._ensure_client()
+        if client is None:
+            return []
+
+        url_hash_val = hash_url(url)
+        seed_domain_host = extract_domain_host(url)
+        sql_seed = """
+        SELECT url_hash, domain_hash, canonical_url, title, snippet, simhash
+        FROM search_index
+        WHERE url_hash = ?
+        LIMIT 1;
+        """
+        try:
+            rs = await client.execute(sql_seed, [url_hash_val])
+            if not rs.rows:
+                return []
+            seed = rs.rows[0]
+            seed_title = str(seed["title"] or "")
+        except Exception as exc:
+            logger.warning("find_similar_seed_failed", url=url, error=str(exc))
+            return []
+
+        terms = sanitize_fts_terms(seed_title)
+        if not terms:
+            return []
+
+        exclude_d = [seed_domain_host] if exclude_source_domain and seed_domain_host else None
+        candidates = await self.search(
+            " ".join(terms[:4]),
+            limit=limit * 3,
+            exclude_domains=exclude_d,
+        )
+
+        filtered = [c for c in candidates if str(c.get("url_hash")) != str(url_hash_val)]
+        return filtered[:limit]
 
     async def get_payloads_map(self, url_hashes: List[int]) -> Dict[int, bytes]:
         """Batch-fetch compressed payloads for multiple url_hashes in one round-trip."""

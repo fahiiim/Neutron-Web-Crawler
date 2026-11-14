@@ -25,6 +25,7 @@ message SearchDocument {
   string crawled_at = 6;
   string full_markdown = 7;
   string full_text = 8;
+  repeated string highlights = 9;
 }
 
 message StatsSnapshot {
@@ -57,6 +58,8 @@ message QueryIndexRequest {
   int32 limit = 2;
   string mode = 3;
   bool include_markdown = 4;
+  repeated string include_domains = 5;
+  repeated string exclude_domains = 6;
 }
 
 message QueryIndexResponse {
@@ -191,6 +194,8 @@ message GatewaySearchRequest {
   string mode = 3;
   bool include_markdown = 4;
   bool refresh = 5;
+  repeated string include_domains = 6;
+  repeated string exclude_domains = 7;
 }
 
 message GatewaySearchResponse {
@@ -203,10 +208,34 @@ message GatewaySearchResponse {
   repeated SearchDocument results = 7;
 }
 
+message BatchGetDocumentsRequest {
+  repeated string urls = 1;
+  repeated string url_hashes = 2;
+  string highlight_query = 3;
+  int32 max_characters = 4;
+}
+
+message BatchGetDocumentsResponse {
+  repeated SearchDocument documents = 1;
+}
+
+message FindSimilarRequest {
+  string url = 1;
+  string url_hash = 2;
+  int32 limit = 3;
+  bool exclude_source_domain = 4;
+}
+
+message FindSimilarResponse {
+  repeated SearchDocument results = 1;
+}
+
 service SearchService {
   rpc QueryIndex(QueryIndexRequest) returns (QueryIndexResponse);
   rpc SynthesizeAnswer(SynthesizeAnswerRequest) returns (SynthesizeAnswerResponse);
   rpc GetDocument(GetDocumentRequest) returns (GetDocumentResponse);
+  rpc BatchGetDocuments(BatchGetDocumentsRequest) returns (BatchGetDocumentsResponse);
+  rpc FindSimilar(FindSimilarRequest) returns (FindSimilarResponse);
   rpc Suggest(SuggestRequest) returns (SuggestResponse);
   rpc GetTrending(GetTrendingRequest) returns (GetTrendingResponse);
   rpc GetStats(GetStatsRequest) returns (GetStatsResponse);
@@ -222,6 +251,8 @@ service CrawlerService {
 
 service GatewayService {
   rpc Search(GatewaySearchRequest) returns (GatewaySearchResponse);
+  rpc BatchGetDocuments(BatchGetDocumentsRequest) returns (BatchGetDocumentsResponse);
+  rpc FindSimilar(FindSimilarRequest) returns (FindSimilarResponse);
   rpc Suggest(SuggestRequest) returns (SuggestResponse);
   rpc GetStats(GetStatsRequest) returns (GetStatsResponse);
   rpc GetDocument(GetDocumentRequest) returns (GetDocumentResponse);

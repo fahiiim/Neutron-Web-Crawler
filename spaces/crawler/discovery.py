@@ -274,12 +274,29 @@ _MODE_ADAPTERS: Dict[str, Set[str]] = {
 }
 
 
+def augment_link_query(query: str, mode: str = "all") -> str:
+    """Enhance queries with Exa-style recommendation intent for live web discovery."""
+    q = query.strip()
+    low = q.lower()
+    if q.startswith('"') or q.endswith('"') or len(q.split()) > 7:
+        return q
+    if any(low.startswith(p) for p in ("how ", "what ", "why ", "when ", "where ", "who ")):
+        return q
+    if mode == "code" and not any(k in low for k in ("github", "repo", "library", "code")):
+        return f"{q} github repository"
+    if mode == "papers" and not any(k in low for k in ("arxiv", "paper", "research", "study")):
+        return f"{q} research paper arxiv"
+    return q
+
+
 async def discover_seed_urls_detailed(
     query: str,
     max_urls: int = 12,
     on_source_complete: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
     mode: str = "all",
     skip_domains: Optional[Set[str]] = None,
+    include_domains: Optional[Set[str]] = None,
+    exclude_domains: Optional[Set[str]] = None,
 ) -> Tuple[List[str], List[Dict[str, Any]]]:
     """Run selected discovery adapters concurrently and return diverse URLs + telemetry."""
     headers = {
@@ -288,8 +305,11 @@ async def discover_seed_urls_detailed(
         "Accept-Language": "en-US,en;q=0.9",
     }
 
+    effective_query = augment_link_query(query, mode=mode)
     allowed_sources = _MODE_ADAPTERS.get((mode or "all").lower(), _MODE_ADAPTERS["all"])
-    blocked_domains = skip_domains or set()
+    blocked_domains = set(skip_domains or set())
+    if exclude_domains:
+        blocked_domains.update(exclude_domains)
     discovered: List[str] = []
     metrics: List[Dict[str, Any]] = []
 
@@ -297,12 +317,12 @@ async def discover_seed_urls_detailed(
         headers=headers, timeout=4.5, follow_redirects=True
     ) as client:
         all_adapters: List[Tuple[str, Awaitable[List[str]]]] = [
-            ("duckduckgo", _discover_duckduckgo_html(client, query)),
-            ("wikipedia", _discover_wikipedia_fulltext(client, query)),
-            ("hackernews", _discover_hackernews(client, query)),
-            ("reddit", _discover_reddit(client, query)),
-            ("arxiv", _discover_arxiv(client, query)),
-            ("github", _discover_github(client, query)),
+            ("duckduckgo", _discover_duckduckgo_html(client, effective_query)),
+            ("wikipedia", _discover_wikipedia_fulltext(client, effective_query)),
+            ("hackernews", _discover_hackernews(client, effective_query)),
+            ("reddit", _discover_reddit(client, effective_query)),
+            ("arxiv", _discover_arxiv(client, effective_query)),
+            ("github", _discover_github(client, effective_query)),
         ]
         if settings.BRAVE_SEARCH_API_KEY:
             all_adapters.append(("brave", _discover_brave(client, query)))
@@ -356,6 +376,8 @@ async def discover_seed_urls_detailed(
         domain = extract_domain_host(canonical)
         if domain in blocked_domains:
             continue
+        if include_domains and domain not in include_domains:
+            continue
         seen_urls.add(canonical)
         candidates_clean.append((canonical, domain))
 
@@ -388,9 +410,16 @@ async def discover_seed_urls(
     max_urls: int = 12,
     mode: str = "all",
     skip_domains: Optional[Set[str]] = None,
+    include_domains: Optional[Set[str]] = None,
+    exclude_domains: Optional[Set[str]] = None,
 ) -> List[str]:
     """Discover diverse candidate seed URLs across web, encyclopedia, tech, and paper sources."""
     urls, _ = await discover_seed_urls_detailed(
-        query, max_urls=max_urls, mode=mode, skip_domains=skip_domains
+        query,
+        max_urls=max_urls,
+        mode=mode,
+        skip_domains=skip_domains,
+        include_domains=include_domains,
+        exclude_domains=exclude_domains,
     )
     return urls

@@ -23,10 +23,12 @@ from services.common.rpc import (
 )
 from spaces.crawler.compression import decompress_text
 from spaces.crawler.db_turso import turso_crawler_client
+from spaces.crawler.dedup import hash_url
 from spaces.crawler.logging_utils import get_logger
 from spaces.crawler.middleware import configure_middleware
 from spaces.crawler.synthesis import (
     attach_synthesis_and_excerpts,
+    extract_query_highlights,
     filter_hits_by_mode,
     sort_hits_by_relevance,
 )
@@ -55,7 +57,14 @@ class SearchServiceImpl:
 
         # Fetch a wider FTS pool so mode filtering and concept re-ranking retain strong hits
         fetch_limit = min(50, max(limit * 3, 30) if mode != "all" else max(limit * 2, 25))
-        raw_hits = await turso_crawler_client.search(clean_query, limit=fetch_limit)
+        include_domains = list(request.include_domains or [])
+        exclude_domains = list(request.exclude_domains or [])
+        raw_hits = await turso_crawler_client.search(
+            clean_query,
+            limit=fetch_limit,
+            include_domains=include_domains if include_domains else None,
+            exclude_domains=exclude_domains if exclude_domains else None,
+        )
         filtered_hits = filter_hits_by_mode(raw_hits, mode)
         reranked_hits = sort_hits_by_relevance(clean_query, filtered_hits, mode=mode)[:limit]
         formatted, answer = await attach_synthesis_and_excerpts(
@@ -154,6 +163,89 @@ class SearchServiceImpl:
             crawled_at=str(meta.get("crawled_at") or ""),
             full_markdown=str(meta.get("snippet") or ""),
             source="snippet_fallback",
+        )
+
+    async def batch_get_documents(
+        self,
+        request: neutron_pb.BatchGetDocumentsRequest,
+        ctx: RequestContext,
+        /,
+    ) -> neutron_pb.BatchGetDocumentsResponse:
+        """Batch-retrieve clean markdown contents and highlights for a list of URLs/hashes."""
+        urls = list(request.urls or [])
+        raw_hashes = list(request.url_hashes or [])
+        target_hashes: List[int] = []
+
+        url_to_hash: Dict[str, int] = {}
+        for u in urls:
+            cleaned_u = str(u).strip()
+            if cleaned_u:
+                h = hash_url(cleaned_u)
+                target_hashes.append(h)
+                url_to_hash[cleaned_u] = h
+
+        for rh in raw_hashes:
+            try:
+                target_hashes.append(int(rh))
+            except (TypeError, ValueError):
+                continue
+
+        unique_hashes = list(dict.fromkeys(target_hashes))[:20]
+        if not unique_hashes:
+            return neutron_pb.BatchGetDocumentsResponse(documents=[])
+
+        payloads = await turso_crawler_client.get_payloads_map(unique_hashes)
+        hl_query = (request.highlight_query or "").strip()
+        max_chars = int(request.max_characters or 3000)
+
+        docs: List[neutron_pb.SearchDocument] = []
+        for h in unique_hashes:
+            meta = await turso_crawler_client.get_document_metadata(h)
+            raw_bytes = payloads.get(h)
+            full_md = decompress_text(raw_bytes) if raw_bytes else ""
+            if not full_md and meta:
+                full_md = str(meta.get("snippet") or "")
+
+            if not meta and not full_md:
+                continue
+
+            truncated_md = full_md[:max_chars] if full_md else ""
+            highlights = (
+                extract_query_highlights(hl_query, full_md, num_highlights=2)
+                if hl_query and full_md
+                else []
+            )
+
+            docs.append(
+                neutron_pb.SearchDocument(
+                    url_hash=str(h),
+                    url=str(meta.get("url") or "") if meta else "",
+                    title=str(meta.get("title") or "") if meta else "",
+                    snippet=str(meta.get("snippet") or "") if meta else "",
+                    crawled_at=str(meta.get("crawled_at") or "") if meta else "",
+                    full_markdown=truncated_md,
+                    highlights=highlights,
+                )
+            )
+
+        return neutron_pb.BatchGetDocumentsResponse(documents=docs)
+
+    async def find_similar(
+        self,
+        request: neutron_pb.FindSimilarRequest,
+        ctx: RequestContext,
+        /,
+    ) -> neutron_pb.FindSimilarResponse:
+        """Find related documents based on seed URL topic and SimHash."""
+        seed_url = (request.url or "").strip()
+        limit = max(1, min(int(request.limit or 5), 20))
+        hits = await turso_crawler_client.find_similar_documents(
+            seed_url,
+            limit=limit,
+            exclude_source_domain=bool(request.exclude_source_domain),
+        )
+        return neutron_pb.FindSimilarResponse(
+            results=[doc_to_proto(h) for h in hits]
         )
 
     async def suggest(

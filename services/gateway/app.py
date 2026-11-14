@@ -15,6 +15,7 @@ from connectrpc.errors import ConnectError
 from connectrpc.request import RequestContext
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel
 from pyqwest import Client as PyqwestClient, HTTPTransport
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
@@ -158,10 +159,14 @@ async def _execute_gateway_search(
     mode: str = "all",
     include_markdown: bool = False,
     refresh: bool = False,
+    include_domains: Optional[List[str]] = None,
+    exclude_domains: Optional[List[str]] = None,
     request_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Coordinate SearchService + CrawlerService over ConnectRPC/gRPC with TTL caching & timings."""
-    cache_key = ("json", clean_query.lower(), mode, limit, include_markdown)
+    inc_tuple = tuple(sorted(include_domains or []))
+    exc_tuple = tuple(sorted(exclude_domains or []))
+    cache_key = ("json", clean_query.lower(), mode, limit, include_markdown, inc_tuple, exc_tuple)
     if not refresh:
         cached_payload = _search_cache.get(cache_key)
         if cached_payload is not None:
@@ -196,6 +201,8 @@ async def _execute_gateway_search(
                 limit=limit,
                 mode=mode,
                 include_markdown=include_markdown,
+                include_domains=include_domains or [],
+                exclude_domains=exclude_domains or [],
             ),
             headers=headers,
         )
@@ -360,6 +367,8 @@ class GatewayServiceImpl:
             mode=(request.mode or "all").strip().lower(),
             include_markdown=bool(request.include_markdown),
             refresh=bool(request.refresh),
+            include_domains=list(request.include_domains or []),
+            exclude_domains=list(request.exclude_domains or []),
             request_id=ctx.request_headers.get("x-request-id"),
         )
         ans_proto, has_ans = answer_to_proto(payload.get("answer"))
@@ -371,6 +380,26 @@ class GatewayServiceImpl:
             answer=ans_proto,
             has_answer=has_ans,
             results=[doc_to_proto(r) for r in payload.get("results", [])],
+        )
+
+    async def batch_get_documents(
+        self,
+        request: neutron_pb.BatchGetDocumentsRequest,
+        ctx: RequestContext,
+        /,
+    ) -> neutron_pb.BatchGetDocumentsResponse:
+        return await _get_search_client().batch_get_documents(
+            request, headers=_rpc_headers(ctx.request_headers.get("x-request-id"))
+        )
+
+    async def find_similar(
+        self,
+        request: neutron_pb.FindSimilarRequest,
+        ctx: RequestContext,
+        /,
+    ) -> neutron_pb.FindSimilarResponse:
+        return await _get_search_client().find_similar(
+            request, headers=_rpc_headers(ctx.request_headers.get("x-request-id"))
         )
 
     async def suggest(
@@ -629,6 +658,18 @@ async def get_document(request: Request, url_hash: str) -> Dict[str, Any]:
     }
 
 
+class ContentsRequest(BaseModel):
+    urls: List[str]
+    highlights: Optional[Dict[str, Any]] = None
+    max_characters: Optional[int] = 3000
+
+
+class FindSimilarRequest(BaseModel):
+    url: str
+    limit: Optional[int] = 5
+    exclude_source_domain: Optional[bool] = True
+
+
 @app.get("/search")
 @limiter.limit(settings.RATE_LIMIT_SEARCH)
 async def search_endpoint(
@@ -637,18 +678,95 @@ async def search_endpoint(
     limit: int = Query(15, ge=1, le=50),
     mode: str = Query("all"),
     refresh: bool = Query(False),
+    include_domains: Optional[str] = Query(None),
+    exclude_domains: Optional[str] = Query(None),
 ) -> Dict[str, Any]:
     """Execute unified hybrid search over ConnectRPC microservices."""
     clean_query = q.strip()
     if not clean_query:
         return {"query": q, "total": 0, "answer": None, "results": []}
+    inc_list = [d.strip() for d in include_domains.split(",") if d.strip()] if include_domains else None
+    exc_list = [d.strip() for d in exclude_domains.split(",") if d.strip()] if exclude_domains else None
     return await _execute_gateway_search(
         clean_query,
         limit=limit,
         mode=mode,
         refresh=refresh,
+        include_domains=inc_list,
+        exclude_domains=exc_list,
         request_id=getattr(request.state, "request_id", None),
     )
+
+
+@app.post("/contents")
+async def contents_endpoint(
+    request: Request,
+    body: ContentsRequest,
+) -> Dict[str, Any]:
+    """Exa-style batch content extraction returning clean Markdown and highlights."""
+    req_id = getattr(request.state, "request_id", None)
+    clean_urls = [u.strip() for u in body.urls if u and u.strip()][:20]
+    if not clean_urls:
+        return {"results": []}
+
+    hl_query = ""
+    if body.highlights and isinstance(body.highlights, dict):
+        hl_query = str(body.highlights.get("query") or "")
+
+    try:
+        resp = await _get_search_client().batch_get_documents(
+            neutron_pb.BatchGetDocumentsRequest(
+                urls=clean_urls,
+                highlight_query=hl_query,
+                max_characters=body.max_characters or 3000,
+            ),
+            headers=_rpc_headers(req_id),
+        )
+        return {
+            "results": [
+                {
+                    "url": d.url,
+                    "url_hash": d.url_hash,
+                    "title": d.title,
+                    "crawled_at": d.crawled_at,
+                    "text": d.full_markdown,
+                    "highlights": list(d.highlights),
+                }
+                for d in resp.documents
+            ]
+        }
+    except Exception as exc:
+        logger.warning("gateway_contents_rpc_failed", request_id=req_id, error=str(exc))
+        raise HTTPException(status_code=502, detail=f"Search service error: {exc}")
+
+
+@app.post("/find_similar")
+async def find_similar_endpoint(
+    request: Request,
+    body: FindSimilarRequest,
+) -> Dict[str, Any]:
+    """Exa-style seed similarity search discovering related documents across domains."""
+    req_id = getattr(request.state, "request_id", None)
+    clean_url = body.url.strip()
+    if not clean_url:
+        return {"seed_url": "", "results": []}
+
+    try:
+        resp = await _get_search_client().find_similar(
+            neutron_pb.FindSimilarRequest(
+                url=clean_url,
+                limit=max(1, min(int(body.limit or 5), 20)),
+                exclude_source_domain=bool(body.exclude_source_domain if body.exclude_source_domain is not None else True),
+            ),
+            headers=_rpc_headers(req_id),
+        )
+        return {
+            "seed_url": clean_url,
+            "results": [proto_to_doc(d) for d in resp.results],
+        }
+    except Exception as exc:
+        logger.warning("gateway_find_similar_rpc_failed", request_id=req_id, error=str(exc))
+        raise HTTPException(status_code=502, detail=f"Search service error: {exc}")
 
 
 @app.get("/api/research")
@@ -660,17 +778,23 @@ async def research_endpoint(
     include_markdown: bool = Query(True),
     mode: str = Query("all"),
     refresh: bool = Query(False),
+    include_domains: Optional[str] = Query(None),
+    exclude_domains: Optional[str] = Query(None),
 ) -> Dict[str, Any]:
     """Developer & AI-Agent JSON API backed by SearchService + CrawlerService RPC."""
     clean_query = q.strip()
     if not clean_query:
         return {"query": q, "total": 0, "answer": None, "sources": []}
+    inc_list = [d.strip() for d in include_domains.split(",") if d.strip()] if include_domains else None
+    exc_list = [d.strip() for d in exclude_domains.split(",") if d.strip()] if exclude_domains else None
     payload = await _execute_gateway_search(
         clean_query,
         limit=max_results,
         mode=mode,
         include_markdown=include_markdown,
         refresh=refresh,
+        include_domains=inc_list,
+        exclude_domains=exc_list,
         request_id=getattr(request.state, "request_id", None),
     )
     return {
@@ -692,10 +816,14 @@ async def search_stream(
     q: str = Query(..., min_length=1, max_length=256),
     mode: str = Query("all"),
     refresh: bool = Query(False),
+    include_domains: Optional[str] = Query(None),
+    exclude_domains: Optional[str] = Query(None),
 ) -> Any:
     """Stream cached index hits, microservice StreamCrawl progress, and cited synthesis via SSE."""
     clean_query = q.strip()
     req_id = getattr(request.state, "request_id", None) or ""
+    inc_list = [d.strip() for d in include_domains.split(",") if d.strip()] if include_domains else None
+    exc_list = [d.strip() for d in exclude_domains.split(",") if d.strip()] if exclude_domains else None
     if not clean_query:
         async def _empty_stream() -> AsyncGenerator[Dict[str, str], None]:
             yield {
@@ -722,7 +850,9 @@ async def search_stream(
 
     async def event_generator() -> AsyncGenerator[Dict[str, str], None]:
         total_t0 = time.perf_counter()
-        stream_cache_key = ("stream", clean_query.lower(), mode)
+        inc_tuple = tuple(sorted(inc_list or []))
+        exc_tuple = tuple(sorted(exc_list or []))
+        stream_cache_key = ("stream", clean_query.lower(), mode, inc_tuple, exc_tuple)
         if not refresh:
             cached_stream = _search_cache.get(stream_cache_key)
             if cached_stream is not None:
@@ -764,7 +894,12 @@ async def search_stream(
         try:
             cached_resp = await search_client.query_index(
                 neutron_pb.QueryIndexRequest(
-                    query=clean_query, limit=10, mode=mode, include_markdown=False
+                    query=clean_query,
+                    limit=10,
+                    mode=mode,
+                    include_markdown=False,
+                    include_domains=inc_list or [],
+                    exclude_domains=exc_list or [],
                 ),
                 headers=headers,
             )

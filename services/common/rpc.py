@@ -130,6 +130,7 @@ def doc_to_proto(
 ) -> neutron_pb.SearchDocument:
     """Convert a search result dict into a Protobuf SearchDocument."""
     full_text = str(doc.get("_full_text") or doc.get("full_text") or "") if include_full_text else ""
+    highlights = [str(h) for h in (doc.get("highlights") or []) if h]
     return neutron_pb.SearchDocument(
         url_hash=str(doc.get("url_hash") or ""),
         url=str(doc.get("url") or ""),
@@ -139,6 +140,7 @@ def doc_to_proto(
         crawled_at=str(doc.get("crawled_at") or ""),
         full_markdown=str(doc.get("full_markdown") or ""),
         full_text=full_text,
+        highlights=highlights,
     )
 
 
@@ -153,6 +155,7 @@ def proto_to_doc(
         "snippet": str(msg.snippet or ""),
         "score": float(msg.score or 0.0),
         "crawled_at": str(msg.crawled_at or ""),
+        "highlights": list(msg.highlights or []),
     }
     if msg.full_markdown:
         out["full_markdown"] = str(msg.full_markdown)
