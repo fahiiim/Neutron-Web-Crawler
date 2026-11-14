@@ -2,10 +2,32 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.env
+*.env.*
+!.env.example
 .venv/
 env/
 data/chunks/
 .DS_Store
 frontend/node_modules/
+frontend/dist/
 
+# Security Hardening: Block Trojan vectors & unintended auto-executables
+.vscode/tasks.json
+.vscode/launch.json
+.vscode/eslint*
+*.bat
+*.cmd
+*.vbs
+*.exe
+*.dll
+*.so
+*.dylib
+frontend/init*
+temp_*.bat
+config.bat
 
+# Certificates & Keys
+*.pem
+*.key
+*.cert
+*.pfx

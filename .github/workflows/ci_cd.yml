@@ -20,6 +20,10 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Security & Repository Integrity Guardrails
+        run: |
+          python scripts/security_guardrail.py
+
       - name: Install Test Dependencies
         run: |
           python -m pip install --upgrade pip

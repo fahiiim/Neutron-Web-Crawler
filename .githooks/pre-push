@@ -1,0 +1,27 @@
+#!/usr/bin/env sh
+# Neutron Git Pre-Push Security Hook
+# Prevents pushing any malicious signatures, tampered manifests, or trojans to remote.
+
+echo "[Neutron Security] Running pre-push security & integrity guardrail..."
+
+if command -v python3 >/dev/null 2>&1; then
+    PYTHON_CMD="python3"
+elif command -v python >/dev/null 2>&1; then
+    PYTHON_CMD="python"
+elif [ -f "./.venv/Scripts/python.exe" ]; then
+    PYTHON_CMD="./.venv/Scripts/python.exe"
+else
+    echo "[WARN] Python not found in PATH; skipping pre-push security check."
+    exit 0
+fi
+
+$PYTHON_CMD scripts/security_guardrail.py
+RESULT=$?
+
+if [ $RESULT -ne 0 ]; then
+    echo "[ABORT] Push rejected! Repository failed security & integrity verification."
+    exit 1
+fi
+
+exit 0
+

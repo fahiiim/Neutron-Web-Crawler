@@ -1,0 +1,59 @@
+name: Security Audit & Supply-Chain Integrity
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run daily at 04:00 UTC to continuously monitor dependencies
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security-guardrails:
+    name: Repository Integrity & Trojan Guardrails
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run Neutron Security Guardrail Scanner
+        run: |
+          python scripts/security_guardrail.py
+
+      - name: Verify Security Guardrail Test Suite
+        run: |
+          python -m unittest tests/test_security_guardrail.py -v
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Audit Frontend Production Dependencies
+        run: |
+          cd frontend
+          npm audit --omit=dev
+
+      - name: Verify No Untracked Sensitive Files in Working Directory
+        run: |
+          if [ -d ".vscode" ]; then
+            if [ -f ".vscode/tasks.json" ] || [ -f ".vscode/launch.json" ]; then
+              echo "ERROR: Forbidden .vscode configuration detected!"
+              exit 1
+            fi
+          fi
+          if [ -f "frontend/init" ]; then
+            echo "ERROR: Forbidden frontend/init payload file detected!"
+            exit 1
+          fi
+

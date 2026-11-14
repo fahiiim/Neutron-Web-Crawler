@@ -1,0 +1,27 @@
+#!/usr/bin/env sh
+# Neutron Git Pre-Commit Security Hook
+# Prevents committing malicious scripts, trojan configs, or secrets.
+
+echo "[Neutron Security] Running pre-commit security guardrail..."
+
+if command -v python3 >/dev/null 2>&1; then
+    PYTHON_CMD="python3"
+elif command -v python >/dev/null 2>&1; then
+    PYTHON_CMD="python"
+elif [ -f "./.venv/Scripts/python.exe" ]; then
+    PYTHON_CMD="./.venv/Scripts/python.exe"
+else
+    echo "[WARN] Python not found in PATH; skipping pre-commit security check."
+    exit 0
+fi
+
+$PYTHON_CMD scripts/security_guardrail.py --staged
+RESULT=$?
+
+if [ $RESULT -ne 0 ]; then
+    echo "[ABORT] Commit rejected due to security guardrail violations."
+    exit 1
+fi
+
+exit 0
+
