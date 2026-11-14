@@ -34,6 +34,9 @@ STOP_WORDS = {
     "those", "through", "to", "too", "under", "until", "up", "very", "was", "we",
     "were", "what", "when", "where", "which", "while", "who", "whom", "why",
     "will", "with", "would", "you", "your", "yours", "yourself", "yourselves",
+    "d", "ll", "m", "re", "s", "t", "ve",
+    "didn", "doesn", "don", "hadn", "hasn", "haven", "isn", "aren", "wasn", "weren",
+    "won", "wouldn", "shouldn", "couldn",
 }
 
 _SYNONYM_GROUPS = {
@@ -47,7 +50,7 @@ _QUESTION_PREFIX_RE = re.compile(
     r"when\s+(?:was|were|is|are|did|do|will)?\s*|"
     r"where\s+(?:is|are|was|were|did|do)?\s*|"
     r"how\s+(?:does|do|did|can|to)\s+|"
-    r"why\s+(?:does|do|did|is|are)\s+|"
+    r"why\s+(?:does|do|did|is|are|have|has)\s+|"
     r"tell\s+me\s+about\s+|"
     r"can\s+you\s+(?:tell\s+me|find|explain)\s+|"
     r"explain\s+|"

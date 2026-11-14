@@ -31,6 +31,9 @@ _STOP_WORDS = {
     "those", "through", "to", "too", "under", "until", "up", "very", "was", "we",
     "were", "what", "when", "where", "which", "while", "who", "whom", "why",
     "will", "with", "would", "you", "your", "yours", "yourself", "yourselves",
+    "d", "ll", "m", "re", "s", "t", "ve",
+    "didn", "doesn", "don", "hadn", "hasn", "haven", "isn", "aren", "wasn", "weren",
+    "won", "wouldn", "shouldn", "couldn",
 }
 
 _SYNONYM_GROUPS = {

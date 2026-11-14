@@ -67,7 +67,7 @@ def _strip_question_framing(query: str) -> str:
 
 
 async def _discover_duckduckgo_html(client: httpx.AsyncClient, query: str) -> List[str]:
-    """Discover real-time web results via DuckDuckGo HTML with single retry."""
+    """Discover real-time web results via DuckDuckGo HTML with Lite fallback."""
     urls: List[str] = []
     target_url = "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote(query)
 
@@ -76,7 +76,7 @@ async def _discover_duckduckgo_html(client: httpx.AsyncClient, query: str) -> Li
             resp = await client.get(
                 target_url,
                 headers={"User-Agent": _pick_user_agent()},
-                timeout=5.0,
+                timeout=4.5,
             )
             if resp.status_code == 200:
                 tree = LexborHTMLParser(resp.text)
@@ -88,12 +88,42 @@ async def _discover_duckduckgo_html(client: httpx.AsyncClient, query: str) -> Li
                         unquoted = urllib.parse.unquote(raw_target)
                         if unquoted.startswith("http") and unquoted not in urls:
                             urls.append(unquoted)
-                break
+                if urls:
+                    break
         except Exception as exc:
             if attempt == 1:
                 logger.warning("discovery_ddg_failed", error=str(exc))
             else:
                 await asyncio.sleep(0.3)
+
+    if not urls:
+        # Fall back to DuckDuckGo Lite which is resilient against datacenter IP blocks
+        try:
+            resp = await client.post(
+                "https://lite.duckduckgo.com/lite/",
+                data={"q": query},
+                headers={"User-Agent": _pick_user_agent()},
+                timeout=4.5,
+            )
+            if resp.status_code == 200:
+                tree = LexborHTMLParser(resp.text)
+                for a in tree.css("a.result-link, a"):
+                    href = a.attributes.get("href", "")
+                    if "uddg=" in href:
+                        idx = href.find("uddg=")
+                        raw_target = href[idx + 5 :].split("&")[0]
+                        unquoted = urllib.parse.unquote(raw_target)
+                        if unquoted.startswith("http") and unquoted not in urls:
+                            urls.append(unquoted)
+                    elif (
+                        href.startswith("http")
+                        and "duckduckgo.com" not in href
+                        and href not in urls
+                    ):
+                        urls.append(href)
+        except Exception as exc:
+            logger.warning("discovery_ddg_lite_failed", error=str(exc))
+
     return urls
 
 

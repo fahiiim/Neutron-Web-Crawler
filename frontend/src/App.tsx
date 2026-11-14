@@ -108,6 +108,7 @@ export function App() {
   const [crawlItems, setCrawlItems] = useState<CrawlItemStatus[]>([]);
   const [elapsedMs, setElapsedMs] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [retryCountdown, setRetryCountdown] = useState<number | null>(null);
 
   const [recentQueries, setRecentQueries] = useState<string[]>(loadRecent);
   const [trendingQueries, setTrendingQueries] = useState<string[]>(EXAMPLE_QUERIES);
@@ -252,6 +253,8 @@ export function App() {
       setStatusText("");
       setCrawlItems([]);
       setErrorMsg(null);
+    setRetryCountdown(null);
+      setRetryCountdown(null);
       setSelectedIdx(-1);
 
       saveRecent(cleanQuery);
@@ -439,16 +442,20 @@ export function App() {
       });
 
       es.addEventListener("backend_error", (ev: MessageEvent) => {
+        let msg =
+          "Search backend services are waking up or temporarily unavailable. Please retry in a few seconds.";
         try {
           const payload = JSON.parse(ev.data);
-          setErrorMsg(
-            payload?.detail ||
-              "Search services are waking up or temporarily unavailable. Please retry in a few seconds.",
-          );
+          if (payload?.detail) msg = payload.detail;
         } catch {
-          setErrorMsg(
-            "Search services are waking up or temporarily unavailable. Please retry in a few seconds.",
-          );
+          // Ignore
+        }
+        setErrorMsg(msg);
+        if (
+          msg.toLowerCase().includes("waking up") ||
+          msg.toLowerCase().includes("unavailable")
+        ) {
+          setRetryCountdown(6);
         }
       });
 
@@ -491,6 +498,21 @@ export function App() {
     },
     [mode, stopStream, saveRecent, fetchStats, fallbackJsonSearch],
   );
+
+  useEffect(() => {
+    if (retryCountdown === null) return;
+    if (retryCountdown <= 0) {
+      setRetryCountdown(null);
+      if (activeQuery) {
+        runSearch(activeQuery, mode, false);
+      }
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setRetryCountdown((prev) => (prev !== null ? prev - 1 : null));
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [retryCountdown, activeQuery, mode, runSearch]);
 
   // Sync URL query parameters on mount and back/forward navigation
   useEffect(() => {
@@ -571,6 +593,7 @@ export function App() {
     setResults([]);
     setAnswer(null);
     setErrorMsg(null);
+    setRetryCountdown(null);
     setLoading(false);
     setCrawling(false);
     window.history.pushState(null, "", window.location.pathname);
@@ -756,8 +779,26 @@ export function App() {
             />
 
             {errorMsg && (
-              <div className="surface-card rounded-lg p-4 mb-5 text-sm text-neutral-300">
-                {errorMsg}
+              <div className="surface-card rounded-lg p-4 mb-5 text-sm text-neutral-300 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
+                  <span>{errorMsg}</span>
+                </div>
+                {retryCountdown !== null && retryCountdown > 0 && (
+                  <div className="flex items-center gap-2 text-xs shrink-0 self-end sm:self-auto">
+                    <span className="text-neutral-400">Auto-retrying in {retryCountdown}s</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRetryCountdown(null);
+                        runSearch(activeQuery, mode, false, true);
+                      }}
+                      className="px-2.5 py-1 rounded bg-white text-black font-medium hover:bg-neutral-200 transition-colors cursor-pointer"
+                    >
+                      Retry now
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -784,27 +825,38 @@ export function App() {
               </div>
             ) : !loading ? (
               <div className="py-16 text-center">
-                <p className="text-sm text-neutral-300">
-                  No matching pages found for &ldquo;{activeQuery}&rdquo;.
-                </p>
-                <div className="mt-4 flex items-center justify-center gap-3 text-xs">
-                  {mode !== "all" && (
-                    <button
-                      type="button"
-                      onClick={() => handleModeChange("all")}
-                      className="px-3 py-1.5 rounded-md border border-white/15 hover:border-white/35 text-white transition-colors cursor-pointer"
-                    >
-                      Search all sources
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => runSearch(activeQuery, mode)}
-                    className="px-3 py-1.5 rounded-md bg-white text-black font-medium hover:bg-neutral-200 transition-colors cursor-pointer"
-                  >
-                    Retry
-                  </button>
-                </div>
+                {retryCountdown !== null && retryCountdown > 0 ? (
+                  <div className="flex flex-col items-center justify-center">
+                    <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin mb-3" />
+                    <p className="text-sm text-neutral-300">
+                      Cloud backend nodes are spinning up. Retrying search in {retryCountdown}s...
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-sm text-neutral-300">
+                      No matching pages found for &ldquo;{activeQuery}&rdquo;.
+                    </p>
+                    <div className="mt-4 flex items-center justify-center gap-3 text-xs">
+                      {mode !== "all" && (
+                        <button
+                          type="button"
+                          onClick={() => handleModeChange("all")}
+                          className="px-3 py-1.5 rounded-md border border-white/15 hover:border-white/35 text-white transition-colors cursor-pointer"
+                        >
+                          Search all sources
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => runSearch(activeQuery, mode)}
+                        className="px-3 py-1.5 rounded-md bg-white text-black font-medium hover:bg-neutral-200 transition-colors cursor-pointer"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             ) : null}
           </div>

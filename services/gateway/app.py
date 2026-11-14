@@ -160,6 +160,12 @@ def _build_clients(
     return search_client, crawler_client
 
 
+def _is_remote_downstream(url: str) -> bool:
+    """Return True if downstream URL points to remote PaaS (Render, Fly, etc.) subject to cold starts."""
+    low = (url or "").lower()
+    return not any(h in low for h in ("127.0.0.1", "localhost", "0.0.0.0", "testserver"))
+
+
 async def _execute_gateway_search(
     clean_query: str,
     *,
@@ -230,29 +236,38 @@ async def _execute_gateway_search(
     cached_resp = None
     cached_docs: List[Dict[str, Any]] = []
     index_t0 = time.perf_counter()
-    try:
-        cached_resp = await search_client.query_index(
-            neutron_pb.QueryIndexRequest(
-                query=clean_query,
-                limit=limit,
-                mode=mode,
-                include_markdown=include_markdown,
-                include_domains=include_domains or [],
-                exclude_domains=exclude_domains or [],
-                search_type=resolved_search_type,
-                category=category or "",
-                start_published_date=start_published_date or "",
-                end_published_date=end_published_date or "",
-                subpages=subpages,
-                subpage_targets=subpage_targets or [],
-            ),
-            headers=headers,
-        )
-        cached_docs = [proto_to_doc(d, include_full_text=False) for d in cached_resp.results]
-    except Exception as exc:
-        search_ok = False
-        search_err = str(exc)
-        logger.warning("gateway_search_rpc_failed", request_id=request_id, error=search_err)
+    is_remote_search = _is_remote_downstream(settings.SEARCH_SERVICE_URL)
+    search_attempts = 2 if is_remote_search else 1
+    for search_attempt in range(search_attempts):
+        try:
+            cached_resp = await search_client.query_index(
+                neutron_pb.QueryIndexRequest(
+                    query=clean_query,
+                    limit=limit,
+                    mode=mode,
+                    include_markdown=include_markdown,
+                    include_domains=include_domains or [],
+                    exclude_domains=exclude_domains or [],
+                    search_type=resolved_search_type,
+                    category=category or "",
+                    start_published_date=start_published_date or "",
+                    end_published_date=end_published_date or "",
+                    subpages=subpages,
+                    subpage_targets=subpage_targets or [],
+                ),
+                headers=headers,
+            )
+            cached_docs = [proto_to_doc(d, include_full_text=False) for d in cached_resp.results]
+            search_ok = True
+            break
+        except Exception as exc:
+            search_ok = False
+            search_err = str(exc)
+            if search_attempt < search_attempts - 1:
+                _maybe_wake_downstream()
+                await asyncio.sleep(1.5)
+            else:
+                logger.warning("gateway_search_rpc_failed", request_id=request_id, error=search_err)
     index_ms = round((time.perf_counter() - index_t0) * 1000)
 
     should_crawl = False
@@ -285,20 +300,28 @@ async def _execute_gateway_search(
     live_proto_docs: List[neutron_pb.SearchDocument] = []
     crawl_t0 = time.perf_counter()
     if should_crawl:
-        try:
-            crawl_resp = await crawler_client.discover_and_crawl(
-                neutron_pb.DiscoverAndCrawlRequest(
-                    query=clean_query,
-                    max_pages=8,
-                    mode=mode,
-                    skip_urls=[] if refresh else [d["url"] for d in cached_docs if d.get("url")],
-                    include_full_text=True,
-                ),
-                headers=headers,
-            )
-            live_proto_docs = list(crawl_resp.documents)
-        except Exception as exc:
-            logger.warning("gateway_crawler_rpc_failed", request_id=request_id, error=str(exc))
+        is_remote_crawler = _is_remote_downstream(settings.CRAWLER_SERVICE_URL)
+        crawl_attempts = 2 if is_remote_crawler else 1
+        for crawl_attempt in range(crawl_attempts):
+            try:
+                crawl_resp = await crawler_client.discover_and_crawl(
+                    neutron_pb.DiscoverAndCrawlRequest(
+                        query=clean_query,
+                        max_pages=8,
+                        mode=mode,
+                        skip_urls=[] if refresh else [d["url"] for d in cached_docs if d.get("url")],
+                        include_full_text=True,
+                    ),
+                    headers=headers,
+                )
+                live_proto_docs = list(crawl_resp.documents)
+                break
+            except Exception as exc:
+                if crawl_attempt < crawl_attempts - 1:
+                    _maybe_wake_downstream()
+                    await asyncio.sleep(2.0)
+                else:
+                    logger.warning("gateway_crawler_rpc_failed", request_id=request_id, error=str(exc))
     crawl_ms = round((time.perf_counter() - crawl_t0) * 1000)
 
     if not search_ok and not live_proto_docs:
@@ -1166,33 +1189,42 @@ async def search_stream(
         st_clean = (type or "auto").strip().lower()
         resolved_search_type = classify_query_intent(clean_query) if st_clean == "auto" else st_clean
 
-        try:
-            cached_resp = await search_client.query_index(
-                neutron_pb.QueryIndexRequest(
-                    query=clean_query,
-                    limit=10,
-                    mode=mode,
-                    include_markdown=False,
-                    include_domains=inc_list or [],
-                    exclude_domains=exc_list or [],
-                    search_type=resolved_search_type,
-                    category=category or "",
-                    subpages=subpages,
-                ),
-                headers=headers,
-            )
-            cached_docs = [proto_to_doc(d, include_full_text=False) for d in cached_resp.results]
-            collected_proto = list(cached_resp.results)
-            index_ms = int(cached_resp.duration_ms)
-            cached_eval = (
-                proto_to_evaluation(getattr(cached_resp, "evaluation", None))
-                if cached_resp is not None
-                else None
-            )
-        except Exception as exc:
-            search_ok = False
-            cached_eval = None
-            logger.warning("gateway_stream_search_rpc_failed", request_id=req_id, error=str(exc))
+        is_remote_search = _is_remote_downstream(settings.SEARCH_SERVICE_URL)
+        search_attempts = 2 if is_remote_search else 1
+        for search_attempt in range(search_attempts):
+            try:
+                cached_resp = await search_client.query_index(
+                    neutron_pb.QueryIndexRequest(
+                        query=clean_query,
+                        limit=10,
+                        mode=mode,
+                        include_markdown=False,
+                        include_domains=inc_list or [],
+                        exclude_domains=exc_list or [],
+                        search_type=resolved_search_type,
+                        category=category or "",
+                        subpages=subpages,
+                    ),
+                    headers=headers,
+                )
+                cached_docs = [proto_to_doc(d, include_full_text=False) for d in cached_resp.results]
+                collected_proto = list(cached_resp.results)
+                index_ms = int(cached_resp.duration_ms)
+                cached_eval = (
+                    proto_to_evaluation(getattr(cached_resp, "evaluation", None))
+                    if cached_resp is not None
+                    else None
+                )
+                search_ok = True
+                break
+            except Exception as exc:
+                search_ok = False
+                cached_eval = None
+                if search_attempt < search_attempts - 1 and not await request.is_disconnected():
+                    _maybe_wake_downstream()
+                    await asyncio.sleep(1.5)
+                else:
+                    logger.warning("gateway_stream_search_rpc_failed", request_id=req_id, error=str(exc))
 
         yield {
             "event": "cached_results",
@@ -1223,94 +1255,121 @@ async def search_stream(
 
             crawl_t0 = time.perf_counter()
             seen_urls = {d.get("url") for d in cached_docs if d.get("url")}
-            try:
-                async for ev in crawler_client.stream_crawl(
-                    neutron_pb.StreamCrawlRequest(
-                        query=clean_query,
-                        max_pages=8,
-                        mode=mode,
-                        skip_urls=[] if refresh else list(seen_urls),
-                        include_full_text=True,
-                        force_refresh=refresh,
-                    ),
-                    headers=headers,
-                ):
-                    if await request.is_disconnected():
-                        return
-                    etype = ev.event_type
-                    if etype == "discovery_result":
-                        m = ev.metric
+            is_remote_crawler = _is_remote_downstream(settings.CRAWLER_SERVICE_URL)
+            max_crawl_attempts = 3 if is_remote_crawler else 1
+            for crawl_attempt in range(max_crawl_attempts):
+                if await request.is_disconnected():
+                    return
+                try:
+                    crawl_ok = True
+                    async for ev in crawler_client.stream_crawl(
+                        neutron_pb.StreamCrawlRequest(
+                            query=clean_query,
+                            max_pages=8,
+                            mode=mode,
+                            skip_urls=[] if refresh else list(seen_urls),
+                            include_full_text=True,
+                            force_refresh=refresh,
+                        ),
+                        headers=headers,
+                    ):
+                        if await request.is_disconnected():
+                            return
+                        etype = ev.event_type
+                        if etype == "discovery_result":
+                            m = ev.metric
+                            yield {
+                                "event": "discovery_result",
+                                "data": json.dumps(
+                                    {
+                                        "source": m.source,
+                                        "urls_found": int(m.urls_found),
+                                        "duration_ms": int(m.duration_ms),
+                                        "status": m.status,
+                                    }
+                                ),
+                            }
+                        elif etype == "status":
+                            yield {"event": "status", "data": json.dumps({"message": ev.message})}
+                        elif etype == "crawl_start":
+                            yield {
+                                "event": "crawl_start",
+                                "data": json.dumps({"url": ev.url, "domain": ev.domain}),
+                            }
+                        elif etype == "crawl_blocked":
+                            oc = ev.outcome
+                            yield {
+                                "event": "crawl_blocked",
+                                "data": json.dumps(
+                                    {
+                                        "url": ev.url,
+                                        "domain": oc.domain or ev.domain,
+                                        "reason": oc.error or "robots.txt",
+                                    }
+                                ),
+                            }
+                        elif etype == "crawl_success" and ev.outcome.document.url:
+                            oc = ev.outcome
+                            pub_doc = proto_to_doc(oc.document, include_full_text=False)
+                            live_url = pub_doc.get("url")
+                            if live_url:
+                                if live_url not in seen_urls:
+                                    seen_urls.add(live_url)
+                                    collected_proto.append(oc.document)
+                                else:
+                                    collected_proto = [
+                                        oc.document if d.url == live_url else d
+                                        for d in collected_proto
+                                    ]
+                                added_live = True
+                            yield {
+                                "event": "crawl_success",
+                                "data": json.dumps(
+                                    {
+                                        "url": ev.url,
+                                        "domain": oc.domain or ev.domain,
+                                        "title": pub_doc.get("title", oc.domain or ev.domain),
+                                        "duration_ms": int(oc.duration_ms),
+                                    }
+                                ),
+                            }
+                            yield {"event": "live_result", "data": json.dumps(pub_doc)}
+                        elif etype == "crawl_error":
+                            oc = ev.outcome
+                            yield {
+                                "event": "crawl_error",
+                                "data": json.dumps(
+                                    {
+                                        "url": ev.url,
+                                        "domain": oc.domain or ev.domain,
+                                        "error": oc.error or "skipped",
+                                    }
+                                ),
+                            }
+                    # Successfully finished stream_crawl
+                    break
+                except Exception as exc:
+                    crawl_ok = False
+                    logger.warning(
+                        "gateway_stream_crawler_failed",
+                        request_id=req_id,
+                        attempt=crawl_attempt,
+                        error=str(exc),
+                    )
+                    if (
+                        crawl_attempt < max_crawl_attempts - 1
+                        and not await request.is_disconnected()
+                    ):
+                        _maybe_wake_downstream()
                         yield {
-                            "event": "discovery_result",
+                            "event": "status",
                             "data": json.dumps(
                                 {
-                                    "source": m.source,
-                                    "urls_found": int(m.urls_found),
-                                    "duration_ms": int(m.duration_ms),
-                                    "status": m.status,
+                                    "message": f"Waking crawler cluster (cold-start spin up, attempt {crawl_attempt + 2}/{max_crawl_attempts})..."
                                 }
                             ),
                         }
-                    elif etype == "status":
-                        yield {"event": "status", "data": json.dumps({"message": ev.message})}
-                    elif etype == "crawl_start":
-                        yield {
-                            "event": "crawl_start",
-                            "data": json.dumps({"url": ev.url, "domain": ev.domain}),
-                        }
-                    elif etype == "crawl_blocked":
-                        oc = ev.outcome
-                        yield {
-                            "event": "crawl_blocked",
-                            "data": json.dumps(
-                                {
-                                    "url": ev.url,
-                                    "domain": oc.domain or ev.domain,
-                                    "reason": oc.error or "robots.txt",
-                                }
-                            ),
-                        }
-                    elif etype == "crawl_success" and ev.outcome.document.url:
-                        oc = ev.outcome
-                        pub_doc = proto_to_doc(oc.document, include_full_text=False)
-                        live_url = pub_doc.get("url")
-                        if live_url:
-                            if live_url not in seen_urls:
-                                seen_urls.add(live_url)
-                                collected_proto.append(oc.document)
-                            else:
-                                collected_proto = [
-                                    oc.document if d.url == live_url else d
-                                    for d in collected_proto
-                                ]
-                            added_live = True
-                        yield {
-                            "event": "crawl_success",
-                            "data": json.dumps(
-                                {
-                                    "url": ev.url,
-                                    "domain": oc.domain or ev.domain,
-                                    "title": pub_doc.get("title", oc.domain or ev.domain),
-                                    "duration_ms": int(oc.duration_ms),
-                                }
-                            ),
-                        }
-                        yield {"event": "live_result", "data": json.dumps(pub_doc)}
-                    elif etype == "crawl_error":
-                        oc = ev.outcome
-                        yield {
-                            "event": "crawl_error",
-                            "data": json.dumps(
-                                {
-                                    "url": ev.url,
-                                    "domain": oc.domain or ev.domain,
-                                    "error": oc.error or "skipped",
-                                }
-                            ),
-                        }
-            except Exception as exc:
-                crawl_ok = False
-                logger.warning("gateway_stream_crawler_failed", request_id=req_id, error=str(exc))
+                        await asyncio.sleep(2.5)
             crawl_ms = round((time.perf_counter() - crawl_t0) * 1000)
 
         if not search_ok and (not should_crawl or not crawl_ok) and not collected_proto:
