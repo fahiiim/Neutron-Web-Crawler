@@ -11,6 +11,7 @@ import {
 import { StatsDrawer } from "./components/StatsDrawer";
 import { DocumentModal, type ReaderTarget } from "./components/DocumentModal";
 import { ArchitectureView } from "./components/ArchitectureView";
+import { PlaygroundView } from "./components/PlaygroundView";
 import type {
   EngineStats,
   GroundedAnswer,
@@ -88,7 +89,7 @@ function loadRecent(): string[] {
 }
 
 export function App() {
-  const [view, setView] = useState<"search" | "architecture">("search");
+  const [view, setView] = useState<"search" | "architecture" | "playground">("search");
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<SearchMode>("all");
   const [searched, setSearched] = useState(false);
@@ -555,11 +556,17 @@ export function App() {
         onGoHome={handleGoHome}
         onOpenStats={() => setStatsOpen(true)}
         onOpenArchitecture={handleOpenArchitecture}
+        onOpenPlayground={() => {
+          stopStream();
+          setView("playground");
+        }}
         currentView={view}
         pagesIndexed={stats?.pages_indexed}
       />
 
-      {view === "architecture" ? (
+      {view === "playground" ? (
+        <PlaygroundView onBack={handleGoHome} />
+      ) : view === "architecture" ? (
         <ArchitectureView
           onBackToSearch={handleGoHome}
           pagesIndexed={stats?.pages_indexed}

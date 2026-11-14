@@ -7,7 +7,7 @@ from collections import OrderedDict
 from contextlib import asynccontextmanager
 import json
 import time
-from typing import Any, AsyncGenerator, Coroutine, Dict, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Coroutine, Dict, List, Optional, Tuple, Union
 import uuid
 
 from connectrpc.code import Code
@@ -15,7 +15,7 @@ from connectrpc.errors import ConnectError
 from connectrpc.request import RequestContext
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pyqwest import Client as PyqwestClient, HTTPTransport
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
@@ -36,6 +36,12 @@ from services.common.rpc import (
     proto_to_doc,
     resolve_protocol,
 )
+
+try:
+    from spaces.crawler.synthesis import classify_query_intent
+except ImportError:
+    def classify_query_intent(query: str) -> str:
+        return "keyword" if len((query or "").split()) <= 2 else "neural"
 
 settings = GatewayServiceSettings()
 logger = structlog.get_logger("neutron.service.gateway")
@@ -157,6 +163,13 @@ async def _execute_gateway_search(
     *,
     limit: int = 15,
     mode: str = "all",
+    search_type: str = "auto",
+    category: Optional[str] = None,
+    start_published_date: Optional[str] = None,
+    end_published_date: Optional[str] = None,
+    subpages: int = 0,
+    subpage_targets: Optional[List[str]] = None,
+    livecrawl: str = "fallback",
     include_markdown: bool = False,
     refresh: bool = False,
     include_domains: Optional[List[str]] = None,
@@ -164,9 +177,30 @@ async def _execute_gateway_search(
     request_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Coordinate SearchService + CrawlerService over ConnectRPC/gRPC with TTL caching & timings."""
+    st_clean = (search_type or "auto").strip().lower()
+    if st_clean == "auto":
+        resolved_search_type = classify_query_intent(clean_query)
+    elif st_clean in ("keyword", "neural"):
+        resolved_search_type = st_clean
+    else:
+        resolved_search_type = "auto"
+
     inc_tuple = tuple(sorted(include_domains or []))
     exc_tuple = tuple(sorted(exclude_domains or []))
-    cache_key = ("json", clean_query.lower(), mode, limit, include_markdown, inc_tuple, exc_tuple)
+    cache_key = (
+        "json",
+        clean_query.lower(),
+        mode,
+        limit,
+        include_markdown,
+        inc_tuple,
+        exc_tuple,
+        resolved_search_type,
+        category,
+        start_published_date,
+        end_published_date,
+        subpages,
+    )
     if not refresh:
         cached_payload = _search_cache.get(cache_key)
         if cached_payload is not None:
@@ -203,6 +237,12 @@ async def _execute_gateway_search(
                 include_markdown=include_markdown,
                 include_domains=include_domains or [],
                 exclude_domains=exclude_domains or [],
+                search_type=resolved_search_type,
+                category=category or "",
+                start_published_date=start_published_date or "",
+                end_published_date=end_published_date or "",
+                subpages=subpages,
+                subpage_targets=subpage_targets or [],
             ),
             headers=headers,
         )
@@ -213,7 +253,15 @@ async def _execute_gateway_search(
         logger.warning("gateway_search_rpc_failed", request_id=request_id, error=search_err)
     index_ms = round((time.perf_counter() - index_t0) * 1000)
 
-    if not refresh and cached_resp is not None and len(cached_docs) >= settings.JIT_CACHE_THRESHOLD:
+    should_crawl = False
+    if livecrawl == "always":
+        should_crawl = True
+    elif livecrawl == "never":
+        should_crawl = False
+    else:  # fallback
+        should_crawl = refresh or len(cached_docs) < settings.JIT_CACHE_THRESHOLD
+
+    if not should_crawl and cached_resp is not None:
         total_ms = round((time.perf_counter() - total_t0) * 1000)
         payload = {
             "query": clean_query,
@@ -222,6 +270,8 @@ async def _execute_gateway_search(
             "total": len(cached_docs),
             "answer": proto_to_answer(cached_resp.answer, has_answer=cached_resp.has_answer),
             "results": cached_docs[:limit],
+            "resolvedSearchType": resolved_search_type,
+            "resolved_search_type": resolved_search_type,
             "cache_hit": False,
             "request_id": request_id or "",
             "timings": {"index_ms": index_ms, "crawl_ms": 0, "synth_ms": 0, "total_ms": total_ms},
@@ -232,20 +282,21 @@ async def _execute_gateway_search(
 
     live_proto_docs: List[neutron_pb.SearchDocument] = []
     crawl_t0 = time.perf_counter()
-    try:
-        crawl_resp = await crawler_client.discover_and_crawl(
-            neutron_pb.DiscoverAndCrawlRequest(
-                query=clean_query,
-                max_pages=8,
-                mode=mode,
-                skip_urls=[] if refresh else [d["url"] for d in cached_docs if d.get("url")],
-                include_full_text=True,
-            ),
-            headers=headers,
-        )
-        live_proto_docs = list(crawl_resp.documents)
-    except Exception as exc:
-        logger.warning("gateway_crawler_rpc_failed", request_id=request_id, error=str(exc))
+    if should_crawl:
+        try:
+            crawl_resp = await crawler_client.discover_and_crawl(
+                neutron_pb.DiscoverAndCrawlRequest(
+                    query=clean_query,
+                    max_pages=8,
+                    mode=mode,
+                    skip_urls=[] if refresh else [d["url"] for d in cached_docs if d.get("url")],
+                    include_full_text=True,
+                ),
+                headers=headers,
+            )
+            live_proto_docs = list(crawl_resp.documents)
+        except Exception as exc:
+            logger.warning("gateway_crawler_rpc_failed", request_id=request_id, error=str(exc))
     crawl_ms = round((time.perf_counter() - crawl_t0) * 1000)
 
     if not search_ok and not live_proto_docs:
@@ -268,10 +319,15 @@ async def _execute_gateway_search(
                 else None
             ),
             "results": cached_docs[:limit],
+            "resolvedSearchType": resolved_search_type,
+            "resolved_search_type": resolved_search_type,
             "cache_hit": False,
             "request_id": request_id or "",
             "timings": {"index_ms": index_ms, "crawl_ms": crawl_ms, "synth_ms": 0, "total_ms": total_ms},
         }
+        if payload["results"]:
+            _search_cache.set(cache_key, payload)
+        return payload
         if payload["results"]:
             _search_cache.set(cache_key, payload)
         return payload
@@ -317,6 +373,8 @@ async def _execute_gateway_search(
                 "total": len(formatted),
                 "answer": proto_to_answer(synth_resp.answer, has_answer=synth_resp.has_answer),
                 "results": formatted,
+                "resolvedSearchType": resolved_search_type,
+                "resolved_search_type": resolved_search_type,
                 "cache_hit": False,
                 "request_id": request_id or "",
                 "timings": {
@@ -342,6 +400,8 @@ async def _execute_gateway_search(
         "total": len(fallback_docs),
         "answer": None,
         "results": fallback_docs,
+        "resolvedSearchType": resolved_search_type,
+        "resolved_search_type": resolved_search_type,
         "cache_hit": False,
         "request_id": request_id or "",
         "timings": {"index_ms": index_ms, "crawl_ms": crawl_ms, "synth_ms": synth_ms, "total_ms": total_ms},
@@ -365,6 +425,12 @@ class GatewayServiceImpl:
             clean_query,
             limit=limit,
             mode=(request.mode or "all").strip().lower(),
+            search_type=request.search_type or "auto",
+            category=request.category or None,
+            start_published_date=request.start_published_date or None,
+            end_published_date=request.end_published_date or None,
+            subpages=int(request.subpages or 0),
+            subpage_targets=list(request.subpage_targets or []),
             include_markdown=bool(request.include_markdown),
             refresh=bool(request.refresh),
             include_domains=list(request.include_domains or []),
@@ -658,16 +724,56 @@ async def get_document(request: Request, url_hash: str) -> Dict[str, Any]:
     }
 
 
+class ExaContentsOptions(BaseModel):
+    text: Optional[Union[bool, Dict[str, Any]]] = True
+    highlights: Optional[Union[bool, Dict[str, Any]]] = None
+    subpages: Optional[int] = 0
+    subpage_target: Optional[Union[str, List[str]]] = Field(default=None, alias="subpageTarget")
+    livecrawl: Optional[str] = "fallback"
+    max_characters: Optional[int] = Field(default=3000, alias="maxCharacters")
+
+    class Config:
+        populate_by_name = True
+
+
+class ExaSearchRequest(BaseModel):
+    query: str
+    type: Optional[str] = "auto"
+    num_results: Optional[int] = Field(default=10, alias="numResults")
+    category: Optional[str] = None
+    include_domains: Optional[List[str]] = Field(default=None, alias="includeDomains")
+    exclude_domains: Optional[List[str]] = Field(default=None, alias="excludeDomains")
+    start_published_date: Optional[str] = Field(default=None, alias="startPublishedDate")
+    end_published_date: Optional[str] = Field(default=None, alias="endPublishedDate")
+    contents: Optional[Union[bool, ExaContentsOptions, Dict[str, Any]]] = None
+    livecrawl: Optional[str] = "fallback"
+
+    class Config:
+        populate_by_name = True
+
+
 class ContentsRequest(BaseModel):
     urls: List[str]
-    highlights: Optional[Dict[str, Any]] = None
-    max_characters: Optional[int] = 3000
+    text: Optional[bool] = True
+    highlights: Optional[Union[bool, Dict[str, Any]]] = None
+    subpages: Optional[int] = 0
+    subpage_target: Optional[Union[str, List[str]]] = Field(default=None, alias="subpageTarget")
+    max_characters: Optional[int] = Field(default=3000, alias="maxCharacters")
+    livecrawl: Optional[str] = "fallback"
+
+    class Config:
+        populate_by_name = True
 
 
 class FindSimilarRequest(BaseModel):
     url: str
-    limit: Optional[int] = 5
-    exclude_source_domain: Optional[bool] = True
+    num_results: Optional[int] = Field(default=5, alias="numResults")
+    limit: Optional[int] = None
+    exclude_source_domain: Optional[bool] = Field(default=True, alias="excludeSourceDomain")
+    contents: Optional[Union[bool, ExaContentsOptions, Dict[str, Any]]] = None
+
+    class Config:
+        populate_by_name = True
 
 
 @app.get("/search")
@@ -677,6 +783,11 @@ async def search_endpoint(
     q: str = Query(..., min_length=1, max_length=256),
     limit: int = Query(15, ge=1, le=50),
     mode: str = Query("all"),
+    type: str = Query("auto"),
+    category: Optional[str] = Query(None),
+    start_published_date: Optional[str] = Query(None),
+    end_published_date: Optional[str] = Query(None),
+    subpages: int = Query(0, ge=0, le=10),
     refresh: bool = Query(False),
     include_domains: Optional[str] = Query(None),
     exclude_domains: Optional[str] = Query(None),
@@ -691,6 +802,11 @@ async def search_endpoint(
         clean_query,
         limit=limit,
         mode=mode,
+        search_type=type,
+        category=category,
+        start_published_date=start_published_date,
+        end_published_date=end_published_date,
+        subpages=subpages,
         refresh=refresh,
         include_domains=inc_list,
         exclude_domains=exc_list,
@@ -698,12 +814,102 @@ async def search_endpoint(
     )
 
 
+@app.post("/search")
+@limiter.limit(settings.RATE_LIMIT_SEARCH)
+async def exa_post_search(
+    request: Request,
+    body: ExaSearchRequest,
+) -> Dict[str, Any]:
+    """Official Exa-compatible POST /search endpoint supporting exa-py and AI agents."""
+    clean_query = body.query.strip()
+    if not clean_query:
+        return {"resolvedSearchType": "keyword", "results": [], "answer": None}
+
+    subpages_cnt = 0
+    subpage_targets: List[str] = []
+    include_md = False
+    livecrawl = body.livecrawl or "fallback"
+
+    if body.contents:
+        include_md = True
+        if isinstance(body.contents, ExaContentsOptions):
+            subpages_cnt = body.contents.subpages or 0
+            if body.contents.subpage_target:
+                subpage_targets = (
+                    [body.contents.subpage_target]
+                    if isinstance(body.contents.subpage_target, str)
+                    else list(body.contents.subpage_target)
+                )
+            if body.contents.livecrawl:
+                livecrawl = body.contents.livecrawl
+        elif isinstance(body.contents, dict):
+            subpages_cnt = int(body.contents.get("subpages") or 0)
+            st = body.contents.get("subpage_target") or body.contents.get("subpageTarget")
+            if st:
+                subpage_targets = [st] if isinstance(st, str) else list(st)
+            if body.contents.get("livecrawl"):
+                livecrawl = str(body.contents.get("livecrawl"))
+
+    limit = max(1, min(int(body.num_results or 10), 50))
+    payload = await _execute_gateway_search(
+        clean_query,
+        limit=limit,
+        mode="all",
+        search_type=body.type or "auto",
+        category=body.category,
+        start_published_date=body.start_published_date,
+        end_published_date=body.end_published_date,
+        subpages=subpages_cnt,
+        subpage_targets=subpage_targets,
+        livecrawl=livecrawl,
+        include_markdown=include_md,
+        include_domains=body.include_domains,
+        exclude_domains=body.exclude_domains,
+        request_id=getattr(request.state, "request_id", None),
+    )
+
+    exa_results = []
+    for doc in payload.get("results") or []:
+        item: Dict[str, Any] = {
+            "id": doc.get("url_hash") or doc.get("url"),
+            "url": doc.get("url"),
+            "title": doc.get("title"),
+            "score": doc.get("score"),
+            "publishedDate": doc.get("crawled_at"),
+            "author": doc.get("author") or "",
+        }
+        if body.contents:
+            item["text"] = doc.get("full_markdown") or doc.get("snippet") or ""
+            item["highlights"] = doc.get("highlights") or []
+            item["subpages"] = doc.get("subpages") or []
+        else:
+            if doc.get("highlights"):
+                item["highlights"] = doc.get("highlights")
+            if doc.get("subpages"):
+                item["subpages"] = doc.get("subpages")
+        exa_results.append(item)
+
+    ans_text = None
+    if payload.get("answer"):
+        ans_text = payload["answer"].get("summary")
+
+    return {
+        "resolvedSearchType": (
+            payload.get("resolvedSearchType")
+            or payload.get("resolved_search_type")
+            or "keyword"
+        ),
+        "results": exa_results,
+        "answer": ans_text,
+    }
+
+
 @app.post("/contents")
 async def contents_endpoint(
     request: Request,
     body: ContentsRequest,
 ) -> Dict[str, Any]:
-    """Exa-style batch content extraction returning clean Markdown and highlights."""
+    """Exa-style batch content extraction returning clean Markdown, highlights, and subpages."""
     req_id = getattr(request.state, "request_id", None)
     clean_urls = [u.strip() for u in body.urls if u and u.strip()][:20]
     if not clean_urls:
@@ -713,24 +919,45 @@ async def contents_endpoint(
     if body.highlights and isinstance(body.highlights, dict):
         hl_query = str(body.highlights.get("query") or "")
 
+    targets: List[str] = []
+    if body.subpage_target:
+        targets = (
+            [body.subpage_target]
+            if isinstance(body.subpage_target, str)
+            else list(body.subpage_target)
+        )
+
     try:
         resp = await _get_search_client().batch_get_documents(
             neutron_pb.BatchGetDocumentsRequest(
                 urls=clean_urls,
                 highlight_query=hl_query,
                 max_characters=body.max_characters or 3000,
+                subpages=int(body.subpages or 0),
+                subpage_targets=targets,
             ),
             headers=_rpc_headers(req_id),
         )
         return {
             "results": [
                 {
+                    "id": d.url_hash or d.url,
                     "url": d.url,
-                    "url_hash": d.url_hash,
                     "title": d.title,
-                    "crawled_at": d.crawled_at,
-                    "text": d.full_markdown,
+                    "publishedDate": d.crawled_at,
+                    "author": "",
+                    "score": d.score or 1.0,
+                    "text": d.full_markdown if body.text is not False else "",
                     "highlights": list(d.highlights),
+                    "subpages": [
+                        {
+                            "id": sp.id,
+                            "url": sp.url,
+                            "title": sp.title,
+                            "text": sp.text,
+                        }
+                        for sp in d.subpages
+                    ],
                 }
                 for d in resp.documents
             ]
@@ -740,6 +967,7 @@ async def contents_endpoint(
         raise HTTPException(status_code=502, detail=f"Search service error: {exc}")
 
 
+@app.post("/findSimilar")
 @app.post("/find_similar")
 async def find_similar_endpoint(
     request: Request,
@@ -751,18 +979,38 @@ async def find_similar_endpoint(
     if not clean_url:
         return {"seed_url": "", "results": []}
 
+    lim = body.limit if body.limit is not None else body.num_results
+    limit_val = max(1, min(int(lim or 5), 20))
+
     try:
         resp = await _get_search_client().find_similar(
             neutron_pb.FindSimilarRequest(
                 url=clean_url,
-                limit=max(1, min(int(body.limit or 5), 20)),
-                exclude_source_domain=bool(body.exclude_source_domain if body.exclude_source_domain is not None else True),
+                limit=limit_val,
+                exclude_source_domain=bool(
+                    body.exclude_source_domain
+                    if body.exclude_source_domain is not None
+                    else True
+                ),
             ),
             headers=_rpc_headers(req_id),
         )
+        results = []
+        for d in resp.results:
+            doc_dict = proto_to_doc(d)
+            results.append({
+                "id": doc_dict.get("url_hash") or doc_dict.get("url"),
+                "url": doc_dict.get("url"),
+                "title": doc_dict.get("title"),
+                "score": doc_dict.get("score"),
+                "publishedDate": doc_dict.get("crawled_at"),
+                "author": "",
+                "highlights": doc_dict.get("highlights") or [],
+                "subpages": doc_dict.get("subpages") or [],
+            })
         return {
             "seed_url": clean_url,
-            "results": [proto_to_doc(d) for d in resp.results],
+            "results": results,
         }
     except Exception as exc:
         logger.warning("gateway_find_similar_rpc_failed", request_id=req_id, error=str(exc))
@@ -815,6 +1063,9 @@ async def search_stream(
     request: Request,
     q: str = Query(..., min_length=1, max_length=256),
     mode: str = Query("all"),
+    type: str = Query("auto"),
+    category: Optional[str] = Query(None),
+    subpages: int = Query(0, ge=0, le=10),
     refresh: bool = Query(False),
     include_domains: Optional[str] = Query(None),
     exclude_domains: Optional[str] = Query(None),
@@ -852,7 +1103,7 @@ async def search_stream(
         total_t0 = time.perf_counter()
         inc_tuple = tuple(sorted(inc_list or []))
         exc_tuple = tuple(sorted(exc_list or []))
-        stream_cache_key = ("stream", clean_query.lower(), mode, inc_tuple, exc_tuple)
+        stream_cache_key = ("stream", clean_query.lower(), mode, type, category, inc_tuple, exc_tuple)
         if not refresh:
             cached_stream = _search_cache.get(stream_cache_key)
             if cached_stream is not None:
@@ -891,6 +1142,9 @@ async def search_stream(
         crawl_ms = 0
         synth_ms = 0
 
+        st_clean = (type or "auto").strip().lower()
+        resolved_search_type = classify_query_intent(clean_query) if st_clean == "auto" else st_clean
+
         try:
             cached_resp = await search_client.query_index(
                 neutron_pb.QueryIndexRequest(
@@ -900,6 +1154,9 @@ async def search_stream(
                     include_markdown=False,
                     include_domains=inc_list or [],
                     exclude_domains=exc_list or [],
+                    search_type=resolved_search_type,
+                    category=category or "",
+                    subpages=subpages,
                 ),
                 headers=headers,
             )

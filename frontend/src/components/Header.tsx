@@ -6,7 +6,8 @@ interface HeaderProps {
   onGoHome: () => void;
   onOpenStats: () => void;
   onOpenArchitecture: () => void;
-  currentView?: "search" | "architecture";
+  onOpenPlayground: () => void;
+  currentView?: "search" | "architecture" | "playground";
   pagesIndexed?: number;
 }
 
@@ -14,6 +15,7 @@ export const Header: React.FC<HeaderProps> = ({
   onGoHome,
   onOpenStats,
   onOpenArchitecture,
+  onOpenPlayground,
   currentView = "search",
   pagesIndexed,
 }) => {
@@ -53,6 +55,15 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
 
         <nav className="hidden sm:flex items-center gap-6 text-xs text-neutral-400">
+          <button
+            type="button"
+            onClick={onOpenPlayground}
+            className={`hover:text-white transition-colors cursor-pointer ${
+              currentView === "playground" ? "text-white font-medium" : ""
+            }`}
+          >
+            Playground
+          </button>
           <button
             type="button"
             onClick={onOpenArchitecture}
@@ -99,6 +110,16 @@ export const Header: React.FC<HeaderProps> = ({
 
       {mobileOpen && (
         <div className="sm:hidden border-t border-white/10 bg-black px-4 py-3 flex flex-col gap-3 text-sm text-neutral-300">
+          <button
+            type="button"
+            onClick={() => {
+              setMobileOpen(false);
+              onOpenPlayground();
+            }}
+            className="text-left hover:text-white py-1 cursor-pointer"
+          >
+            Playground
+          </button>
           <button
             type="button"
             onClick={() => {

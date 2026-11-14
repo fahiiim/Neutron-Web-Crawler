@@ -18,7 +18,8 @@ from fastapi.testclient import TestClient
 from neutron_rpc.neutron.v1 import neutron_pb
 from services.gateway.app import app
 from spaces.crawler.discovery import augment_link_query
-from spaces.crawler.synthesis import extract_query_highlights
+from spaces.crawler.parser import extract_subpage_candidates
+from spaces.crawler.synthesis import classify_query_intent, extract_query_highlights
 
 
 class TestExaAdoptedFeatures(unittest.TestCase):
@@ -136,6 +137,123 @@ class TestExaAdoptedFeatures(unittest.TestCase):
         _, kwargs = mock_search.call_args
         self.assertEqual(kwargs.get("include_domains"), ["arxiv.org", "github.com"])
         self.assertEqual(kwargs.get("exclude_domains"), ["quora.com"])
+
+    def test_classify_query_intent(self):
+        # Keyword triggers
+        self.assertEqual(classify_query_intent('"exact phrase search"'), "keyword")
+        self.assertEqual(classify_query_intent("site:github.com python"), "keyword")
+        self.assertEqual(classify_query_intent("filetype:pdf machine learning"), "keyword")
+        self.assertEqual(classify_query_intent("HTTP_200_OK"), "keyword")
+        self.assertEqual(classify_query_intent("foo.bar()"), "keyword")
+        self.assertEqual(classify_query_intent("get_user_by_id"), "keyword")
+        self.assertEqual(classify_query_intent("reactDom"), "keyword")
+        self.assertEqual(classify_query_intent("python"), "keyword")
+
+        # Neural triggers
+        self.assertEqual(classify_query_intent("when bangladesh is established"), "neural")
+        self.assertEqual(classify_query_intent("what is quantum computing"), "neural")
+        self.assertEqual(classify_query_intent("how to build an autonomous agent in python"), "neural")
+        self.assertEqual(classify_query_intent("best tools for distributed web scraping"), "neural")
+        self.assertEqual(classify_query_intent("compare postgresql vs mongodb for json"), "neural")
+        self.assertEqual(classify_query_intent("papers on diffusion models with code?"), "neural")
+
+    def test_extract_subpage_candidates(self):
+        parent_url = "https://example.com/project"
+        links = [
+            "https://example.com/project/docs",
+            "https://example.com/project/pricing",
+            "https://example.com/project/api",
+            "https://example.com/login",
+            "https://external.com/other",
+            "https://example.com/project",
+            "https://example.com/blog/2024",
+        ]
+        candidates = extract_subpage_candidates(parent_url, links, targets=["doc", "api"], max_subpages=3)
+        self.assertIn("https://example.com/project/docs", candidates)
+        self.assertIn("https://example.com/project/api", candidates)
+        self.assertNotIn("https://external.com/other", candidates)
+        self.assertNotIn("https://example.com/project", candidates)
+        self.assertLessEqual(len(candidates), 3)
+
+    @patch("services.gateway.app._execute_gateway_search")
+    def test_exa_post_search_endpoint(self, mock_search):
+        mock_search.return_value = {
+            "query": "vector databases",
+            "mode": "all",
+            "source": "hybrid_jit",
+            "total": 1,
+            "answer": {"summary": "Vector databases index embeddings."},
+            "results": [
+                {
+                    "url": "https://example.com/docs",
+                    "url_hash": "112233",
+                    "title": "Vector Docs",
+                    "snippet": "Full documentation.",
+                    "score": 0.95,
+                    "crawled_at": "2026-11-14",
+                    "full_markdown": "# Documentation",
+                    "highlights": ["Vector Docs highlight"],
+                    "subpages": [
+                        {"id": "4455", "url": "https://example.com/docs/api", "title": "API Reference"}
+                    ],
+                }
+            ],
+            "resolvedSearchType": "neural",
+        }
+
+        resp = self.client.post(
+            "/search",
+            json={
+                "query": "vector databases",
+                "type": "auto",
+                "numResults": 5,
+                "contents": {
+                    "text": True,
+                    "highlights": True,
+                    "subpages": 2,
+                },
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn("resolvedSearchType", data)
+        self.assertEqual(data["resolvedSearchType"], "neural")
+        self.assertEqual(len(data["results"]), 1)
+        res = data["results"][0]
+        self.assertEqual(res["url"], "https://example.com/docs")
+        self.assertEqual(res["text"], "# Documentation")
+        self.assertIn("highlights", res)
+        self.assertIn("subpages", res)
+        self.assertEqual(data["answer"], "Vector databases index embeddings.")
+
+    @patch("services.gateway.app._get_search_client")
+    def test_find_similar_camel_case_endpoint(self, mock_get_client):
+        mock_search = AsyncMock()
+        mock_get_client.return_value = mock_search
+
+        similar_doc = neutron_pb.SearchDocument(
+            url="https://other.org/similar",
+            url_hash="789012",
+            title="Similar Tool",
+            snippet="A similar tool for indexing.",
+            score=0.88,
+        )
+        mock_search.find_similar.return_value = neutron_pb.FindSimilarResponse(
+            results=[similar_doc]
+        )
+
+        resp = self.client.post(
+            "/findSimilar",
+            json={
+                "url": "https://example.com/source",
+                "numResults": 3,
+                "excludeSourceDomain": True,
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["seed_url"], "https://example.com/source")
+        self.assertEqual(len(data["results"]), 1)
 
 
 if __name__ == "__main__":

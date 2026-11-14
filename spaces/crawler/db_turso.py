@@ -315,8 +315,11 @@ class TursoCrawlerClient:
         limit: int,
         include_domains: Optional[List[str]] = None,
         exclude_domains: Optional[List[str]] = None,
+        category: Optional[str] = None,
+        start_published_date: Optional[str] = None,
+        end_published_date: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """Run an FTS5 MATCH query with BM25 ranking and optional domain inclusion/exclusion."""
+        """Run an FTS5 MATCH query with BM25 ranking, domain inclusion/exclusion, category, and date filtering."""
         client = await self._ensure_client()
         if client is None:
             return []
@@ -337,6 +340,39 @@ class TursoCrawlerClient:
                 placeholders = ",".join("?" for _ in exc_hashes)
                 where_clauses.append(f"s.domain_hash NOT IN ({placeholders})")
                 params.extend(exc_hashes)
+
+        if start_published_date:
+            clean_start = str(start_published_date).strip()[:19].replace("T", " ")
+            if clean_start:
+                where_clauses.append("s.crawled_at >= ?")
+                params.append(clean_start)
+
+        if end_published_date:
+            clean_end = str(end_published_date).strip()[:19].replace("T", " ")
+            if clean_end:
+                where_clauses.append("s.crawled_at <= ?")
+                params.append(clean_end)
+
+        if category:
+            cat = category.strip().lower()
+            if cat == "github":
+                where_clauses.append("s.canonical_url LIKE '%github.com/%'")
+            elif cat in ("research paper", "research", "paper", "arxiv"):
+                where_clauses.append(
+                    "(s.canonical_url LIKE '%arxiv.org/%' OR s.canonical_url LIKE '%.edu/%' "
+                    "OR s.canonical_url LIKE '%nature.com/%' OR s.canonical_url LIKE '%science.org/%')"
+                )
+            elif cat == "news":
+                where_clauses.append(
+                    "(s.canonical_url LIKE '%/news/%' OR s.canonical_url LIKE '%/article/%' "
+                    "OR s.canonical_url LIKE '%bbc.%' OR s.canonical_url LIKE '%reuters.com%' "
+                    "OR s.canonical_url LIKE '%nytimes.com%')"
+                )
+            elif cat == "blog":
+                where_clauses.append(
+                    "(s.canonical_url LIKE '%/blog/%' OR s.canonical_url LIKE '%medium.com%' "
+                    "OR s.canonical_url LIKE '%substack.com%' OR s.canonical_url LIKE '%dev.to%')"
+                )
 
         params.append(limit)
         sql = f"""
@@ -385,8 +421,11 @@ class TursoCrawlerClient:
         limit: int = 15,
         include_domains: Optional[List[str]] = None,
         exclude_domains: Optional[List[str]] = None,
+        category: Optional[str] = None,
+        start_published_date: Optional[str] = None,
+        end_published_date: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """Execute high-precision stemmed AND -> multi-term quorum FTS5 search."""
+        """Execute high-precision stemmed AND -> multi-term quorum FTS5 search with filters."""
         terms = sanitize_fts_terms(query)
         if not terms:
             return []
@@ -397,6 +436,9 @@ class TursoCrawlerClient:
             limit,
             include_domains=include_domains,
             exclude_domains=exclude_domains,
+            category=category,
+            start_published_date=start_published_date,
+            end_published_date=end_published_date,
         )
 
         # For 4+ terms, allow high-threshold quorum (>= 70%, min 3 terms) for typo resilience
@@ -412,6 +454,9 @@ class TursoCrawlerClient:
                 limit,
                 include_domains=include_domains,
                 exclude_domains=exclude_domains,
+                category=category,
+                start_published_date=start_published_date,
+                end_published_date=end_published_date,
             )
             seen_hashes = {h["url_hash"] for h in hits}
             for item in quorum_hits:
@@ -420,6 +465,71 @@ class TursoCrawlerClient:
                     seen_hashes.add(item["url_hash"])
 
         return hits[:limit]
+
+    async def hydrate_subpages(
+        self,
+        parent_url: str,
+        candidate_links: List[str],
+        targets: Optional[List[str]] = None,
+        max_subpages: int = 3,
+    ) -> List[Dict[str, Any]]:
+        """Hydrate internal child pages from local index/payloads or return candidate references."""
+        if not candidate_links:
+            return []
+        try:
+            from .parser import extract_subpage_candidates
+        except ImportError:
+            from parser import extract_subpage_candidates
+
+        subpage_urls = extract_subpage_candidates(
+            parent_url, candidate_links, targets=targets, max_subpages=max_subpages
+        )
+        if not subpage_urls:
+            return []
+
+        client = await self._ensure_client()
+        subpage_hashes = [hash_url(u) for u in subpage_urls]
+        hydrated: List[Dict[str, Any]] = []
+
+        if client is not None and subpage_hashes:
+            placeholders = ",".join("?" for _ in subpage_hashes)
+            sql = f"""
+            SELECT url_hash, canonical_url, title, snippet
+            FROM search_index
+            WHERE url_hash IN ({placeholders});
+            """
+            try:
+                rs = await client.execute(sql, subpage_hashes)
+                found_by_hash = {str(r["url_hash"]): r for r in rs.rows}
+                for u in subpage_urls:
+                    uh = str(hash_url(u))
+                    if uh in found_by_hash:
+                        row = found_by_hash[uh]
+                        hydrated.append({
+                            "id": uh,
+                            "url": row["canonical_url"],
+                            "title": row["title"] or u,
+                            "text": row["snippet"] or "",
+                        })
+                    else:
+                        hydrated.append({
+                            "id": uh,
+                            "url": u,
+                            "title": u.split("/")[-1].replace("-", " ").capitalize() or u,
+                            "text": "",
+                        })
+            except Exception as exc:
+                logger.warning("hydrate_subpages_failed", error=str(exc))
+
+        if not hydrated:
+            for u in subpage_urls:
+                hydrated.append({
+                    "id": str(hash_url(u)),
+                    "url": u,
+                    "title": u.split("/")[-1].replace("-", " ").capitalize() or u,
+                    "text": "",
+                })
+        return hydrated[:max_subpages]
 
     async def find_similar_documents(
         self,

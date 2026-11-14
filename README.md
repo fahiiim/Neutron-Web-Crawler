@@ -67,16 +67,66 @@ For full component, sequence, ranking, database schema, security, and cold-start
 
 ## Gateway Public Endpoints
 
-| Endpoint | Description |
-| :--- | :--- |
-| `GET /health` | Readiness probe + throttled downstream warm-up for `neutron-search` and `neutron-crawler` |
-| `GET /stats` | Index counters (`pages_indexed`, `domains_covered`, `frontier_pending`, `payloads_stored`, `connected`) |
-| `GET /trending` | Top recent hot topics from Turso |
-| `GET /suggest?q=...` | Query autocomplete suggestions |
-| `GET /search?q=...&mode=all&refresh=false` | Unified hybrid search JSON (`results`, `answer`, `timings`, `cache_hit`, `request_id`) |
-| `GET /search/stream?q=...&mode=all&refresh=false` | Server-Sent Events (SSE) stream backed by `QueryIndex` + `CrawlerService.StreamCrawl` |
-| `GET /api/research?q=...&include_markdown=true` | Developer & AI-Agent JSON endpoint returning grounded answer + full Markdown `sources` |
-| `GET /doc/{url_hash}` | Decompressed Markdown article from `page_payloads` (`64-bit` string hash safe in JS) |
+| Endpoint | Method | Description |
+| :--- | :--- | :--- |
+| `GET /health` | GET | Readiness probe + throttled downstream warm-up for `neutron-search` and `neutron-crawler` |
+| `GET /stats` | GET | Index counters (`pages_indexed`, `domains_covered`, `frontier_pending`, `payloads_stored`, `connected`) |
+| `GET /trending` | GET | Top recent hot topics from Turso |
+| `GET /suggest?q=...` | GET | Query autocomplete suggestions |
+| `GET /search` | GET | Unified hybrid search JSON (`results`, `answer`, `timings`, `cache_hit`, `request_id`) |
+| `POST /search` | POST | **Exa-compatible drop-in search** (`type: auto|keyword|neural`, `numResults`, `category`, `contents`, `subpages`) |
+| `POST /contents` | POST | **Exa-compatible batch document extraction** returning clean Markdown, highlights, and subpages |
+| `POST /findSimilar` | POST | **Exa-compatible similarity search** by seed URL topic and SimHash |
+| `GET /search/stream` | GET | Server-Sent Events (SSE) stream backed by `QueryIndex` + `CrawlerService.StreamCrawl` |
+| `GET /api/research` | GET | Developer & AI-Agent JSON endpoint returning grounded answer + full Markdown `sources` |
+| `GET /doc/{url_hash}` | GET | Decompressed Markdown article from `page_payloads` (`64-bit` string hash safe in JS) |
+
+---
+
+## Exa-Compatible AI Retrieval API (`exa-py` Drop-In)
+
+Neutron natively supports the official Exa SDK protocol, allowing AI agents (LangChain `ExaSearchRetriever`, LlamaIndex, AutoGen) to use Neutron as an open, private drop-in replacement:
+
+```python
+from exa_py import Exa
+
+# Connect to your Neutron Gateway instance:
+exa = Exa(api_key="neutron_key", base_url="https://neutron-gateway.onrender.com")
+
+# 1. Search with automated intent routing & full document hydration:
+response = exa.search_and_contents(
+    "papers on autonomous agent reasoning",
+    type="auto",          # Heuristic router: "keyword" (BM25) vs "neural" (semantic hybrid)
+    category="research paper",
+    num_results=5,
+    text=True,            # Extract clean, ad-free Markdown
+    highlights=True,      # Extract contextual snippet highlights
+    subpages=2,           # Traverse & hydrate up to 2 internal child docs/pricing/guides
+    subpage_target=["docs", "guides", "api"]
+)
+
+print(f"Resolved Search Type: {response.resolved_search_type}")
+for res in response.results:
+    print(f"[{res.score:.2f}] {res.title} -> {res.url}")
+    print("Highlights:", getattr(res, "highlights", []))
+    print("Subpages:", [sp.title for sp in getattr(res, "subpages", [])])
+
+# 2. Batch content extraction:
+contents = exa.get_contents(
+    ["https://en.wikipedia.org/wiki/Artificial_intelligence"],
+    text=True,
+    highlights={"query": "machine learning foundation"}
+)
+
+# 3. Find similar documents across domains:
+similar = exa.find_similar(
+    url="https://arxiv.org/abs/2206.02722",
+    num_results=5,
+    exclude_source_domain=True
+)
+```
+
+Interactive developer testing is available directly in the web UI via the **Exa API Playground** tab (`frontend/src/components/PlaygroundView.tsx`).
 
 ---
 

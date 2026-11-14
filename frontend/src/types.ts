@@ -1,5 +1,12 @@
 export type SearchMode = 'all' | 'encyclopedia' | 'papers' | 'code' | 'discussions';
 
+export interface SubpageResult {
+  id: string;
+  url: string;
+  title: string;
+  text?: string;
+}
+
 export interface SearchResult {
   url_hash: string;
   url: string;
@@ -8,6 +15,8 @@ export interface SearchResult {
   score?: number;
   crawled_at?: string | null;
   isLive?: boolean;
+  highlights?: string[];
+  subpages?: SubpageResult[];
 }
 
 export interface AnswerCitation {

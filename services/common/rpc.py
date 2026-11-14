@@ -131,6 +131,16 @@ def doc_to_proto(
     """Convert a search result dict into a Protobuf SearchDocument."""
     full_text = str(doc.get("_full_text") or doc.get("full_text") or "") if include_full_text else ""
     highlights = [str(h) for h in (doc.get("highlights") or []) if h]
+    subpage_protos = [
+        neutron_pb.SubpageDocument(
+            id=str(sp.get("id") or sp.get("url_hash") or ""),
+            url=str(sp.get("url") or ""),
+            title=str(sp.get("title") or ""),
+            text=str(sp.get("text") or sp.get("full_markdown") or sp.get("snippet") or ""),
+        )
+        for sp in (doc.get("subpages") or [])
+        if isinstance(sp, dict) and sp.get("url")
+    ]
     return neutron_pb.SearchDocument(
         url_hash=str(doc.get("url_hash") or ""),
         url=str(doc.get("url") or ""),
@@ -141,6 +151,7 @@ def doc_to_proto(
         full_markdown=str(doc.get("full_markdown") or ""),
         full_text=full_text,
         highlights=highlights,
+        subpages=subpage_protos,
     )
 
 
@@ -156,6 +167,15 @@ def proto_to_doc(
         "score": float(msg.score or 0.0),
         "crawled_at": str(msg.crawled_at or ""),
         "highlights": list(msg.highlights or []),
+        "subpages": [
+            {
+                "id": str(sp.id or ""),
+                "url": str(sp.url or ""),
+                "title": str(sp.title or ""),
+                "text": str(sp.text or ""),
+            }
+            for sp in (msg.subpages or [])
+        ],
     }
     if msg.full_markdown:
         out["full_markdown"] = str(msg.full_markdown)

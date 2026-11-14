@@ -568,3 +568,54 @@ async def attach_synthesis_and_excerpts(
         formatted_docs.append(clean_doc)
 
     return formatted_docs, answer
+
+
+def classify_query_intent(query: str) -> str:
+    """Classify search query into 'keyword' (lexical FTS5 BM25) vs 'neural' (semantic/hybrid)."""
+    q = (query or "").strip()
+    if not q:
+        return "keyword"
+    # Exact quotes or operator syntax -> keyword
+    if (q.startswith('"') and q.endswith('"')) or "site:" in q.lower() or "filetype:" in q.lower():
+        return "keyword"
+    # Code symbols, function calls, underscore identifiers -> keyword
+    if any(ch in q for ch in ("_", "()", "->", "::", "[]", "{}")) or re.search(
+        r"\b[a-z]+[A-Z][a-zA-Z0-9]*\b", q
+    ):
+        return "keyword"
+    # Question words, conversational prefixes, natural language phrases -> neural
+    low = q.lower()
+    words = low.split()
+    question_starters = (
+        "what",
+        "who",
+        "when",
+        "where",
+        "why",
+        "how",
+        "which",
+        "can",
+        "explain",
+        "tell",
+        "compare",
+    )
+    if words and words[0] in question_starters:
+        return "neural"
+    if any(
+        q_word in words
+        for q_word in (
+            "best",
+            "guide",
+            "tutorial",
+            "overview",
+            "vs",
+            "versus",
+            "difference",
+            "example",
+            "recommendation",
+        )
+    ):
+        return "neural"
+    if len(words) >= 4 or "?" in q:
+        return "neural"
+    return "keyword"

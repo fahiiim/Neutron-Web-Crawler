@@ -111,6 +111,41 @@ export const ResultCard: React.FC<ResultCardProps> = ({
         </p>
       )}
 
+      {result.highlights && result.highlights.length > 0 && (
+        <div className="mt-2 space-y-1">
+          {result.highlights.map((hl, i) => (
+            <div
+              key={i}
+              className="text-xs text-neutral-300 bg-white/[0.03] border-l-2 border-neutral-500 pl-2.5 py-1 italic rounded-r"
+            >
+              "{cleanSnippetText(hl)}"
+            </div>
+          ))}
+        </div>
+      )}
+
+      {result.subpages && result.subpages.length > 0 && (
+        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] font-mono-tech text-neutral-500 uppercase tracking-wider mr-1">
+            Subpages:
+          </span>
+          {result.subpages.map((sp, i) => (
+            <a
+              key={i}
+              href={safeHttpUrl(sp.url)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-[11px] font-mono-tech text-neutral-300 bg-white/[0.04] hover:bg-white/[0.08] hover:text-white px-2 py-0.5 rounded border border-white/[0.06] transition-colors"
+            >
+              <span className="truncate max-w-[200px]">
+                {sp.title || sp.url.split("/").pop() || sp.url}
+              </span>
+              <ExternalLink className="w-2.5 h-2.5 text-neutral-500 shrink-0" />
+            </a>
+          ))}
+        </div>
+      )}
+
       <div className="mt-2.5 flex items-center gap-4 text-xs text-neutral-500">
         <button
           type="button"

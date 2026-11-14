@@ -529,7 +529,30 @@ All tables, FTS5 virtual indexes, synchronization triggers, compressed blobs, an
 \end{figure}
 
 % ==============================================================================
-% SECTION 6: BUDGETS, SECURITY & VERIFICATION
+% SECTION 6: AI RETRIEVAL & EXA AGENT INTERFACE
+% ==============================================================================
+\section{AI Retrieval Engine \& Exa-Compatible Agent Interface}
+
+To support autonomous AI agents (\textit{e.g.}, LangChain \texttt{ExaSearchRetriever}, LlamaIndex, AutoGen, and custom ReAct loops), Neutron v3.0 provides full protocol parity with the Exa.ai API, enabling zero-configuration drop-in replacement via the official \texttt{exa-py} SDK.
+
+\subsection{Heuristic Intent Routing (\texttt{classify\_query\_intent})}
+Modern search workloads bifurcate into two retrieval paradigms: exact lexical lookups (\textit{e.g.}, function signatures, error codes, quoted terms) and semantic exploration (\textit{e.g.}, conversational queries, conceptual comparisons, open-ended research). Neutron implements a smart heuristic classifier that routes requests dynamically:
+\begin{itemize}
+    \item \textbf{\texttt{keyword}}: Selected for quoted phrases (\texttt{"..."}), code symbols (\texttt{\_}, \texttt{()}, \texttt{->}, \texttt{::}), camelCase identifiers, domain prefixes (\texttt{site:}, \texttt{filetype:}), and 1--2 token queries. Queries execute against Porter-stemmed FTS5 BM25 with quorum fallback.
+    \item \textbf{\texttt{neural}}: Selected for conversational questions (\textit{who}, \textit{what}, \textit{when}, \textit{where}, \textit{how}, \textit{why}), comparison operators (\textit{vs}, \textit{difference}), recommendation phrases (\textit{best}, \textit{guide}), or multi-term natural language queries. Triggers query expansion, live web discovery adapters, and cited synthesis.
+\end{itemize}
+
+\subsection{Exa Drop-In Endpoints \& Entity Dossier Traversal}
+The Edge Gateway exposes the complete Exa API contract over standard HTTPS JSON:
+\begin{itemize}
+    \item \textbf{\texttt{POST /search}}: Accepts Exa payloads (\texttt{query}, \texttt{type}, \texttt{numResults}, \texttt{category}, \texttt{contents}, \texttt{subpages}, \texttt{livecrawl}), returning \texttt{resolvedSearchType}, ranked results with clean Markdown, snippet highlights, subpages, and optional grounded answers.
+    \item \textbf{\texttt{POST /contents}}: Batch extracts clean Markdown, entity highlights, and child subpages for up to 20 target URLs in a single round-trip, leveraging the compressed \texttt{page\_payloads} store.
+    \item \textbf{\texttt{POST /findSimilar}}: Discovers structurally and topically related URLs from a seed document, computing SimHash Hamming distances and cross-domain keyword clusters while excluding the source domain.
+    \item \textbf{Subpage Dossiers}: The parser extracts candidate internal links matching priority documentation paths (\texttt{docs/}, \texttt{api/}, \texttt{pricing/}, \texttt{guides/}) and hydates child documents directly into the response entity tree.
+\end{itemize}
+
+% ==============================================================================
+% SECTION 7: BUDGETS, SECURITY & VERIFICATION
 % ==============================================================================
 \clearpage
 \section{Latency Budgets, Security Controls \& Tooling}

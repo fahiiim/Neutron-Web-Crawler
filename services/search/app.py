@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import re
 import time
 from typing import Any, AsyncGenerator, Dict, List
 
@@ -59,11 +60,18 @@ class SearchServiceImpl:
         fetch_limit = min(50, max(limit * 3, 30) if mode != "all" else max(limit * 2, 25))
         include_domains = list(request.include_domains or [])
         exclude_domains = list(request.exclude_domains or [])
+        category = (request.category or "").strip() or None
+        start_date = (request.start_published_date or "").strip() or None
+        end_date = (request.end_published_date or "").strip() or None
+
         raw_hits = await turso_crawler_client.search(
             clean_query,
             limit=fetch_limit,
             include_domains=include_domains if include_domains else None,
             exclude_domains=exclude_domains if exclude_domains else None,
+            category=category,
+            start_published_date=start_date,
+            end_published_date=end_date,
         )
         filtered_hits = filter_hits_by_mode(raw_hits, mode)
         reranked_hits = sort_hits_by_relevance(clean_query, filtered_hits, mode=mode)[:limit]
@@ -78,6 +86,21 @@ class SearchServiceImpl:
             gemini_model=settings.GEMINI_MODEL,
             gemini_timeout_seconds=settings.GEMINI_TIMEOUT_SECONDS,
         )
+
+        subpages_count = max(0, min(int(request.subpages or 0), 10))
+        if subpages_count > 0:
+            targets = list(request.subpage_targets or [])
+            for doc in formatted:
+                parent_u = doc.get("url") or ""
+                body = doc.get("full_markdown") or doc.get("snippet") or ""
+                candidate_links = re.findall(r"https?://[^\s\"'>)]+", body)
+                if candidate_links and parent_u:
+                    doc["subpages"] = await turso_crawler_client.hydrate_subpages(
+                        parent_u, candidate_links, targets=targets, max_subpages=subpages_count
+                    )
+                else:
+                    doc["subpages"] = []
+
         duration_ms = round((time.perf_counter() - t0) * 1000)
 
         proto_answer, has_answer = answer_to_proto(answer)
@@ -216,6 +239,25 @@ class SearchServiceImpl:
                 else []
             )
 
+            subpages_list: List[neutron_pb.SubpageDocument] = []
+            subpages_count = max(0, min(int(request.subpages or 0), 10))
+            if subpages_count > 0 and full_md:
+                parent_u = str(meta.get("url") or "") if meta else ""
+                candidate_links = re.findall(r"https?://[^\s\"'>)]+", full_md)
+                if candidate_links and parent_u:
+                    sub_dicts = await turso_crawler_client.hydrate_subpages(
+                        parent_u, candidate_links, targets=list(request.subpage_targets or []), max_subpages=subpages_count
+                    )
+                    subpages_list = [
+                        neutron_pb.SubpageDocument(
+                            id=str(sd.get("id") or ""),
+                            url=str(sd.get("url") or ""),
+                            title=str(sd.get("title") or ""),
+                            text=str(sd.get("text") or ""),
+                        )
+                        for sd in sub_dicts
+                    ]
+
             docs.append(
                 neutron_pb.SearchDocument(
                     url_hash=str(h),
@@ -225,6 +267,7 @@ class SearchServiceImpl:
                     crawled_at=str(meta.get("crawled_at") or "") if meta else "",
                     full_markdown=truncated_md,
                     highlights=highlights,
+                    subpages=subpages_list,
                 )
             )
 

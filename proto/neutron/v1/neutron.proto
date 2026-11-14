@@ -16,6 +16,13 @@ message GroundedAnswer {
   string mode = 3;
 }
 
+message SubpageDocument {
+  string id = 1;
+  string url = 2;
+  string title = 3;
+  string text = 4;
+}
+
 message SearchDocument {
   string url_hash = 1;
   string url = 2;
@@ -26,6 +33,7 @@ message SearchDocument {
   string full_markdown = 7;
   string full_text = 8;
   repeated string highlights = 9;
+  repeated SubpageDocument subpages = 10;
 }
 
 message StatsSnapshot {
@@ -60,6 +68,12 @@ message QueryIndexRequest {
   bool include_markdown = 4;
   repeated string include_domains = 5;
   repeated string exclude_domains = 6;
+  string search_type = 7;
+  string category = 8;
+  string start_published_date = 9;
+  string end_published_date = 10;
+  int32 subpages = 11;
+  repeated string subpage_targets = 12;
 }
 
 message QueryIndexResponse {
@@ -196,6 +210,12 @@ message GatewaySearchRequest {
   bool refresh = 5;
   repeated string include_domains = 6;
   repeated string exclude_domains = 7;
+  string search_type = 8;
+  string category = 9;
+  string start_published_date = 10;
+  string end_published_date = 11;
+  int32 subpages = 12;
+  repeated string subpage_targets = 13;
 }
 
 message GatewaySearchResponse {
@@ -213,6 +233,8 @@ message BatchGetDocumentsRequest {
   repeated string url_hashes = 2;
   string highlight_query = 3;
   int32 max_characters = 4;
+  int32 subpages = 5;
+  repeated string subpage_targets = 6;
 }
 
 message BatchGetDocumentsResponse {
@@ -224,6 +246,8 @@ message FindSimilarRequest {
   string url_hash = 2;
   int32 limit = 3;
   bool exclude_source_domain = 4;
+  int32 subpages = 5;
+  repeated string subpage_targets = 6;
 }
 
 message FindSimilarResponse {

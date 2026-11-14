@@ -2,7 +2,7 @@
 
 import json
 import re
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 import urllib.parse
 
 try:
@@ -418,3 +418,59 @@ def parse_page_content(html: str, base_url: str) -> Dict[str, Any]:
         "author": json_ld.get("author"),
         "published_at": published_at,
     }
+
+
+def extract_subpage_candidates(
+    parent_url: str,
+    links: List[str],
+    targets: Optional[List[str]] = None,
+    max_subpages: int = 3,
+) -> List[str]:
+    """Identify priority internal child subpages matching target topics or docs/pricing/guides."""
+    try:
+        from .dedup import extract_domain_host
+    except ImportError:
+        from dedup import extract_domain_host
+
+    parent_host = extract_domain_host(parent_url)
+    if not parent_host:
+        return []
+    parent_parsed = urllib.parse.urlsplit(parent_url)
+    parent_path = parent_parsed.path.rstrip("/")
+
+    priority_keywords = [
+        t.lower().strip()
+        for t in (targets or ["doc", "guide", "pricing", "api", "about", "feature", "faq"])
+        if t and t.strip()
+    ]
+    candidates: List[Tuple[int, str]] = []
+
+    for lk in links:
+        if not lk or not lk.startswith(("http://", "https://")):
+            continue
+        if extract_domain_host(lk) != parent_host:
+            continue
+        lk_parsed = urllib.parse.urlsplit(lk)
+        lk_path = lk_parsed.path.rstrip("/")
+        if not lk_path or lk_path == parent_path or lk == parent_url:
+            continue
+
+        low_lk = lk.lower()
+        score = sum(3 for kw in priority_keywords if kw in low_lk)
+        if parent_path and lk_path.startswith(parent_path + "/"):
+            score += 2
+        if any(bad in low_lk for bad in ("login", "signin", "signup", "register", "privacy", "cookie")):
+            score -= 5
+
+        candidates.append((score, lk))
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    seen: Set[str] = set()
+    out: List[str] = []
+    for _, lk in candidates:
+        if lk not in seen:
+            seen.add(lk)
+            out.append(lk)
+        if len(out) >= max_subpages:
+            break
+    return out
