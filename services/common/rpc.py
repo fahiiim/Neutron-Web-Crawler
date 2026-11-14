@@ -184,6 +184,41 @@ def proto_to_doc(
     return out
 
 
+def evaluation_to_proto(
+    eval_dict: Optional[Dict[str, Any]],
+) -> Optional[neutron_pb.EvaluationMetrics]:
+    """Convert an evaluation metrics dict into a Protobuf message."""
+    if not eval_dict:
+        return None
+    return neutron_pb.EvaluationMetrics(
+        confidence_score=float(eval_dict.get("confidence_score") or 0.0),
+        query_coverage=float(eval_dict.get("query_coverage") or 0.0),
+        grounding_faithfulness=float(eval_dict.get("grounding_faithfulness") or 0.0),
+        relevance_grade=str(eval_dict.get("relevance_grade") or ""),
+        matched_concepts=[str(c) for c in (eval_dict.get("matched_concepts") or [])],
+        missing_concepts=[str(c) for c in (eval_dict.get("missing_concepts") or [])],
+        evaluation_summary=str(eval_dict.get("evaluation_summary") or ""),
+    )
+
+
+def proto_to_evaluation(
+    msg: Optional[neutron_pb.EvaluationMetrics],
+) -> Optional[Dict[str, Any]]:
+    """Convert a Protobuf EvaluationMetrics message back into a plain dict."""
+    if msg is None or not (msg.confidence_score or msg.relevance_grade or msg.evaluation_summary):
+        return None
+    return {
+        "confidence_score": round(float(msg.confidence_score), 3),
+        "confidence_percent": int(round(float(msg.confidence_score) * 100)),
+        "query_coverage": round(float(msg.query_coverage), 3),
+        "grounding_faithfulness": round(float(msg.grounding_faithfulness), 3),
+        "relevance_grade": str(msg.relevance_grade or "Moderate"),
+        "matched_concepts": list(msg.matched_concepts or []),
+        "missing_concepts": list(msg.missing_concepts or []),
+        "evaluation_summary": str(msg.evaluation_summary or ""),
+    }
+
+
 def answer_to_proto(
     answer: Optional[Dict[str, Any]],
 ) -> Tuple[neutron_pb.GroundedAnswer, bool]:
@@ -201,11 +236,13 @@ def answer_to_proto(
         )
         for c in (answer.get("citations") or [])
     ]
+    eval_proto = evaluation_to_proto(answer.get("evaluation"))
     return (
         neutron_pb.GroundedAnswer(
             summary=str(answer["summary"]),
             citations=citations,
             mode=str(answer.get("mode") or "extractive_grounded"),
+            evaluation=eval_proto,
         ),
         True,
     )
@@ -217,7 +254,7 @@ def proto_to_answer(
     """Convert a Protobuf GroundedAnswer back into a plain dict."""
     if not has_answer or msg is None or not msg.summary:
         return None
-    return {
+    out: Dict[str, Any] = {
         "summary": str(msg.summary),
         "citations": [
             {
@@ -231,4 +268,7 @@ def proto_to_answer(
         ],
         "mode": str(msg.mode or "extractive_grounded"),
     }
+    if msg.evaluation is not None and (msg.evaluation.confidence_score or msg.evaluation.relevance_grade):
+        out["evaluation"] = proto_to_evaluation(msg.evaluation)
+    return out
 

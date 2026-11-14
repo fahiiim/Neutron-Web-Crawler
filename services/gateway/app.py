@@ -30,10 +30,12 @@ from services.common.rpc import (
     answer_to_proto,
     configure_cors,
     doc_to_proto,
+    evaluation_to_proto,
     internal_auth_headers,
     mount_connect_service,
     proto_to_answer,
     proto_to_doc,
+    proto_to_evaluation,
     resolve_protocol,
 )
 
@@ -308,16 +310,25 @@ async def _execute_gateway_search(
 
     if not live_proto_docs:
         total_ms = round((time.perf_counter() - total_t0) * 1000)
+        ans_dict = (
+            proto_to_answer(cached_resp.answer, has_answer=cached_resp.has_answer)
+            if cached_resp is not None
+            else None
+        )
+        eval_dict = (
+            proto_to_evaluation(getattr(cached_resp, "evaluation", None))
+            if cached_resp is not None
+            else None
+        )
+        if not eval_dict and ans_dict and ans_dict.get("evaluation"):
+            eval_dict = ans_dict["evaluation"]
         payload = {
             "query": clean_query,
             "mode": mode,
             "source": "hybrid_jit",
             "total": len(cached_docs),
-            "answer": (
-                proto_to_answer(cached_resp.answer, has_answer=cached_resp.has_answer)
-                if cached_resp is not None
-                else None
-            ),
+            "answer": ans_dict,
+            "evaluation": eval_dict,
             "results": cached_docs[:limit],
             "resolvedSearchType": resolved_search_type,
             "resolved_search_type": resolved_search_type,
@@ -325,9 +336,6 @@ async def _execute_gateway_search(
             "request_id": request_id or "",
             "timings": {"index_ms": index_ms, "crawl_ms": crawl_ms, "synth_ms": 0, "total_ms": total_ms},
         }
-        if payload["results"]:
-            _search_cache.set(cache_key, payload)
-        return payload
         if payload["results"]:
             _search_cache.set(cache_key, payload)
         return payload
@@ -365,13 +373,18 @@ async def _execute_gateway_search(
             )
             synth_ms = round((time.perf_counter() - synth_t0) * 1000)
             total_ms = round((time.perf_counter() - total_t0) * 1000)
+            ans_dict = proto_to_answer(synth_resp.answer, has_answer=synth_resp.has_answer)
+            eval_dict = proto_to_evaluation(getattr(synth_resp, "evaluation", None))
+            if not eval_dict and ans_dict and ans_dict.get("evaluation"):
+                eval_dict = ans_dict["evaluation"]
             formatted = [proto_to_doc(d, include_full_text=False) for d in synth_resp.results][:limit]
             payload = {
                 "query": clean_query,
                 "mode": mode,
                 "source": "hybrid_jit",
                 "total": len(formatted),
-                "answer": proto_to_answer(synth_resp.answer, has_answer=synth_resp.has_answer),
+                "answer": ans_dict,
+                "evaluation": eval_dict,
                 "results": formatted,
                 "resolvedSearchType": resolved_search_type,
                 "resolved_search_type": resolved_search_type,
@@ -399,6 +412,7 @@ async def _execute_gateway_search(
         "source": "live_fallback",
         "total": len(fallback_docs),
         "answer": None,
+        "evaluation": None,
         "results": fallback_docs,
         "resolvedSearchType": resolved_search_type,
         "resolved_search_type": resolved_search_type,
@@ -438,6 +452,7 @@ class GatewayServiceImpl:
             request_id=ctx.request_headers.get("x-request-id"),
         )
         ans_proto, has_ans = answer_to_proto(payload.get("answer"))
+        eval_proto = evaluation_to_proto(payload.get("evaluation"))
         return neutron_pb.GatewaySearchResponse(
             query=payload["query"],
             mode=payload["mode"],
@@ -446,6 +461,7 @@ class GatewayServiceImpl:
             answer=ans_proto,
             has_answer=has_ans,
             results=[doc_to_proto(r) for r in payload.get("results", [])],
+            evaluation=eval_proto,
         )
 
     async def batch_get_documents(
@@ -724,7 +740,7 @@ async def get_document(request: Request, url_hash: str) -> Dict[str, Any]:
     }
 
 
-class ExaContentsOptions(BaseModel):
+class AgentContentsOptions(BaseModel):
     text: Optional[Union[bool, Dict[str, Any]]] = True
     highlights: Optional[Union[bool, Dict[str, Any]]] = None
     subpages: Optional[int] = 0
@@ -736,7 +752,7 @@ class ExaContentsOptions(BaseModel):
         populate_by_name = True
 
 
-class ExaSearchRequest(BaseModel):
+class AgentSearchRequest(BaseModel):
     query: str
     type: Optional[str] = "auto"
     num_results: Optional[int] = Field(default=10, alias="numResults")
@@ -745,7 +761,7 @@ class ExaSearchRequest(BaseModel):
     exclude_domains: Optional[List[str]] = Field(default=None, alias="excludeDomains")
     start_published_date: Optional[str] = Field(default=None, alias="startPublishedDate")
     end_published_date: Optional[str] = Field(default=None, alias="endPublishedDate")
-    contents: Optional[Union[bool, ExaContentsOptions, Dict[str, Any]]] = None
+    contents: Optional[Union[bool, AgentContentsOptions, Dict[str, Any]]] = None
     livecrawl: Optional[str] = "fallback"
 
     class Config:
@@ -770,7 +786,7 @@ class FindSimilarRequest(BaseModel):
     num_results: Optional[int] = Field(default=5, alias="numResults")
     limit: Optional[int] = None
     exclude_source_domain: Optional[bool] = Field(default=True, alias="excludeSourceDomain")
-    contents: Optional[Union[bool, ExaContentsOptions, Dict[str, Any]]] = None
+    contents: Optional[Union[bool, AgentContentsOptions, Dict[str, Any]]] = None
 
     class Config:
         populate_by_name = True
@@ -816,14 +832,14 @@ async def search_endpoint(
 
 @app.post("/search")
 @limiter.limit(settings.RATE_LIMIT_SEARCH)
-async def exa_post_search(
+async def agent_post_search(
     request: Request,
-    body: ExaSearchRequest,
+    body: AgentSearchRequest,
 ) -> Dict[str, Any]:
-    """Official Exa-compatible POST /search endpoint supporting exa-py and AI agents."""
+    """Unified Agent Retrieval POST /search endpoint supporting AI agents."""
     clean_query = body.query.strip()
     if not clean_query:
-        return {"resolvedSearchType": "keyword", "results": [], "answer": None}
+        return {"resolvedSearchType": "keyword", "results": [], "answer": None, "evaluation": None}
 
     subpages_cnt = 0
     subpage_targets: List[str] = []
@@ -832,7 +848,7 @@ async def exa_post_search(
 
     if body.contents:
         include_md = True
-        if isinstance(body.contents, ExaContentsOptions):
+        if isinstance(body.contents, AgentContentsOptions):
             subpages_cnt = body.contents.subpages or 0
             if body.contents.subpage_target:
                 subpage_targets = (
@@ -868,7 +884,7 @@ async def exa_post_search(
         request_id=getattr(request.state, "request_id", None),
     )
 
-    exa_results = []
+    agent_results = []
     for doc in payload.get("results") or []:
         item: Dict[str, Any] = {
             "id": doc.get("url_hash") or doc.get("url"),
@@ -887,7 +903,7 @@ async def exa_post_search(
                 item["highlights"] = doc.get("highlights")
             if doc.get("subpages"):
                 item["subpages"] = doc.get("subpages")
-        exa_results.append(item)
+        agent_results.append(item)
 
     ans_text = None
     if payload.get("answer"):
@@ -899,8 +915,9 @@ async def exa_post_search(
             or payload.get("resolved_search_type")
             or "keyword"
         ),
-        "results": exa_results,
+        "results": agent_results,
         "answer": ans_text,
+        "evaluation": payload.get("evaluation"),
     }
 
 
@@ -909,7 +926,7 @@ async def contents_endpoint(
     request: Request,
     body: ContentsRequest,
 ) -> Dict[str, Any]:
-    """Exa-style batch content extraction returning clean Markdown, highlights, and subpages."""
+    """Agent batch content extraction returning clean Markdown, highlights, and subpages."""
     req_id = getattr(request.state, "request_id", None)
     clean_urls = [u.strip() for u in body.urls if u and u.strip()][:20]
     if not clean_urls:
@@ -973,7 +990,7 @@ async def find_similar_endpoint(
     request: Request,
     body: FindSimilarRequest,
 ) -> Dict[str, Any]:
-    """Exa-style seed similarity search discovering related documents across domains."""
+    """Seed similarity search discovering related documents across domains."""
     req_id = getattr(request.state, "request_id", None)
     clean_url = body.url.strip()
     if not clean_url:
@@ -1120,6 +1137,8 @@ async def search_stream(
                 }
                 if cached_stream.get("answer"):
                     yield {"event": "answer", "data": json.dumps(cached_stream["answer"])}
+                if cached_stream.get("evaluation"):
+                    yield {"event": "evaluation", "data": json.dumps(cached_stream["evaluation"])}
                 yield {
                     "event": "done",
                     "data": json.dumps(
@@ -1127,6 +1146,7 @@ async def search_stream(
                             "completed": True,
                             "cache_hit": True,
                             "request_id": req_id,
+                            "evaluation": cached_stream.get("evaluation"),
                             "timings": {"index_ms": 0, "crawl_ms": 0, "synth_ms": 0, "total_ms": 0},
                         }
                     ),
@@ -1163,8 +1183,14 @@ async def search_stream(
             cached_docs = [proto_to_doc(d, include_full_text=False) for d in cached_resp.results]
             collected_proto = list(cached_resp.results)
             index_ms = int(cached_resp.duration_ms)
+            cached_eval = (
+                proto_to_evaluation(getattr(cached_resp, "evaluation", None))
+                if cached_resp is not None
+                else None
+            )
         except Exception as exc:
             search_ok = False
+            cached_eval = None
             logger.warning("gateway_stream_search_rpc_failed", request_id=req_id, error=str(exc))
 
         yield {
@@ -1174,6 +1200,7 @@ async def search_stream(
                     "count": len(cached_docs),
                     "duration_ms": index_ms,
                     "results": cached_docs,
+                    "evaluation": cached_eval,
                     "cache_hit": False,
                 }
             ),
@@ -1298,6 +1325,7 @@ async def search_stream(
             }
 
         final_answer: Optional[Dict[str, Any]] = None
+        eval_dict: Optional[Dict[str, Any]] = cached_eval
         if collected_proto and not await request.is_disconnected():
             if (
                 not added_live
@@ -1306,7 +1334,11 @@ async def search_stream(
                 and cached_resp.has_answer
             ):
                 final_answer = proto_to_answer(cached_resp.answer, has_answer=True)
+                if getattr(cached_resp, "evaluation", None) is not None:
+                    eval_dict = proto_to_evaluation(cached_resp.evaluation)
                 if final_answer:
+                    if eval_dict and not final_answer.get("evaluation"):
+                        final_answer["evaluation"] = eval_dict
                     yield {"event": "answer", "data": json.dumps(final_answer)}
             else:
                 synth_t0 = time.perf_counter()
@@ -1321,17 +1353,24 @@ async def search_stream(
                         headers=headers,
                     )
                     final_answer = proto_to_answer(synth.answer, has_answer=synth.has_answer)
+                    if getattr(synth, "evaluation", None) is not None:
+                        eval_dict = proto_to_evaluation(synth.evaluation)
                     if final_answer:
+                        if eval_dict and not final_answer.get("evaluation"):
+                            final_answer["evaluation"] = eval_dict
                         yield {"event": "answer", "data": json.dumps(final_answer)}
                 except Exception as exc:
                     logger.warning("gateway_stream_synth_failed", request_id=req_id, error=str(exc))
                 synth_ms = round((time.perf_counter() - synth_t0) * 1000)
 
+        if eval_dict:
+            yield {"event": "evaluation", "data": json.dumps(eval_dict)}
+
         final_docs = [proto_to_doc(d, include_full_text=False) for d in collected_proto]
         if final_docs:
             _search_cache.set(
                 stream_cache_key,
-                {"results": final_docs, "answer": final_answer},
+                {"results": final_docs, "answer": final_answer, "evaluation": eval_dict},
             )
 
         total_ms = round((time.perf_counter() - total_t0) * 1000)
@@ -1342,6 +1381,7 @@ async def search_stream(
                     "completed": True,
                     "cache_hit": False,
                     "request_id": req_id,
+                    "evaluation": eval_dict,
                     "timings": {
                         "index_ms": index_ms,
                         "crawl_ms": crawl_ms,

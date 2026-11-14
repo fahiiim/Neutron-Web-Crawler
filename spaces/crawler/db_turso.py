@@ -43,7 +43,8 @@ _SYNONYM_GROUPS = {
 
 _QUESTION_PREFIX_RE = re.compile(
     r"^(what\s+(?:is|are|was|were|does|do|to\s+do\s+to(?:\s+make\s+me)?)\s+(?:the\s+)?(?:(?:name|(?:\w+\s+)?purpose|reason|role|benefit|benefits|meaning|definition|overview|concept)\s+of\s+(?:the\s+)?)?|"
-    r"who\s+(?:is|are|was|were|invented|wrote|created)\s+(?:the\s+)?|"
+    r"who(?:'?s|\s+is|\s+are|\s+was|\s+were|\s+invented|\s+wrote|\s+created)?\s+(?:the\s+)?|"
+    r"whos\s+(?:is|are|was|were)?\s*|"
     r"when\s+(?:was|were|is|are|did|do|will)?\s*|"
     r"where\s+(?:is|are|was|were|did|do)?\s*|"
     r"how\s+(?:does|do|did|can|to)\s+|"
@@ -56,7 +57,7 @@ _QUESTION_PREFIX_RE = re.compile(
 )
 
 _LEADING_QUESTION_RE = re.compile(
-    r"^(what|who|how|why|which|where|when|tell|can|explain)\b",
+    r"^(what|who|whos|how|why|which|where|when|tell|can|explain)\b",
     flags=re.IGNORECASE,
 )
 
@@ -234,6 +235,21 @@ def score_document_relevance(
     low_snippet = (snippet or "").lower()
     low_url = (url or "").lower().replace("-", " ").replace("_", " ").replace("/", " ")
     low_body = (body_text or "")[:6000].lower()
+
+    core_terms = [t for t in terms if len(t) >= 3]
+    if core_terms:
+        core_matched = sum(
+            1
+            for t in core_terms
+            if (
+                _term_matches_text(t, low_title)
+                or _term_matches_text(t, low_url)
+                or _term_matches_text(t, low_snippet)
+                or _term_matches_text(t, low_body)
+            )
+        )
+        if core_matched == 0:
+            return 0, 0.0
 
     matched_terms = 0
     score = 0.0

@@ -10,10 +10,21 @@ message Citation {
   string domain = 5;
 }
 
+message EvaluationMetrics {
+  double confidence_score = 1;
+  double query_coverage = 2;
+  double grounding_faithfulness = 3;
+  string relevance_grade = 4;
+  repeated string matched_concepts = 5;
+  repeated string missing_concepts = 6;
+  string evaluation_summary = 7;
+}
+
 message GroundedAnswer {
   string summary = 1;
   repeated Citation citations = 2;
   string mode = 3;
+  EvaluationMetrics evaluation = 4;
 }
 
 message SubpageDocument {
@@ -81,6 +92,7 @@ message QueryIndexResponse {
   GroundedAnswer answer = 2;
   int32 duration_ms = 3;
   bool has_answer = 4;
+  EvaluationMetrics evaluation = 5;
 }
 
 message SynthesizeAnswerRequest {
@@ -94,6 +106,7 @@ message SynthesizeAnswerResponse {
   repeated SearchDocument results = 1;
   GroundedAnswer answer = 2;
   bool has_answer = 3;
+  EvaluationMetrics evaluation = 4;
 }
 
 message GetDocumentRequest {
@@ -226,6 +239,7 @@ message GatewaySearchResponse {
   GroundedAnswer answer = 5;
   bool has_answer = 6;
   repeated SearchDocument results = 7;
+  EvaluationMetrics evaluation = 8;
 }
 
 message BatchGetDocumentsRequest {

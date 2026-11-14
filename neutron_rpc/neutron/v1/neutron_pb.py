@@ -70,7 +70,71 @@ class Citation(Message[_CitationFields]):
         title: str
         domain: str
 
-_GroundedAnswerFields: TypeAlias = Literal["summary", "citations", "mode"]
+_EvaluationMetricsFields: TypeAlias = Literal["confidence_score", "query_coverage", "grounding_faithfulness", "relevance_grade", "matched_concepts", "missing_concepts", "evaluation_summary"]
+
+class EvaluationMetrics(Message[_EvaluationMetricsFields]):
+    """
+    ```proto
+    message neutron.v1.EvaluationMetrics
+    ```
+
+    Attributes:
+        confidence_score:
+            ```proto
+            double confidence_score = 1;
+            ```
+        query_coverage:
+            ```proto
+            double query_coverage = 2;
+            ```
+        grounding_faithfulness:
+            ```proto
+            double grounding_faithfulness = 3;
+            ```
+        relevance_grade:
+            ```proto
+            string relevance_grade = 4;
+            ```
+        matched_concepts:
+            ```proto
+            repeated string matched_concepts = 5;
+            ```
+        missing_concepts:
+            ```proto
+            repeated string missing_concepts = 6;
+            ```
+        evaluation_summary:
+            ```proto
+            string evaluation_summary = 7;
+            ```
+    """
+
+    __slots__ = ("confidence_score", "query_coverage", "grounding_faithfulness", "relevance_grade", "matched_concepts", "missing_concepts", "evaluation_summary")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            confidence_score: float = 0,
+            query_coverage: float = 0,
+            grounding_faithfulness: float = 0,
+            relevance_grade: str = "",
+            matched_concepts: list[str] | None = None,
+            missing_concepts: list[str] | None = None,
+            evaluation_summary: str = "",
+        ) -> None:
+            pass
+
+        confidence_score: float
+        query_coverage: float
+        grounding_faithfulness: float
+        relevance_grade: str
+        matched_concepts: list[str]
+        missing_concepts: list[str]
+        evaluation_summary: str
+
+_GroundedAnswerFields: TypeAlias = Literal["summary", "citations", "mode", "evaluation"]
 
 class GroundedAnswer(Message[_GroundedAnswerFields]):
     """
@@ -91,9 +155,13 @@ class GroundedAnswer(Message[_GroundedAnswerFields]):
             ```proto
             string mode = 3;
             ```
+        evaluation:
+            ```proto
+            optional neutron.v1.EvaluationMetrics evaluation = 4;
+            ```
     """
 
-    __slots__ = ("summary", "citations", "mode")
+    __slots__ = ("summary", "citations", "mode", "evaluation")
 
     if TYPE_CHECKING:
 
@@ -103,12 +171,14 @@ class GroundedAnswer(Message[_GroundedAnswerFields]):
             summary: str = "",
             citations: list[Citation] | None = None,
             mode: str = "",
+            evaluation: EvaluationMetrics | None = None,
         ) -> None:
             pass
 
         summary: str
         citations: list[Citation]
         mode: str
+        evaluation: EvaluationMetrics | None
 
 _SubpageDocumentFields: TypeAlias = Literal["id", "url", "title", "text"]
 
@@ -494,7 +564,7 @@ class QueryIndexRequest(Message[_QueryIndexRequestFields]):
         subpages: int
         subpage_targets: list[str]
 
-_QueryIndexResponseFields: TypeAlias = Literal["results", "answer", "duration_ms", "has_answer"]
+_QueryIndexResponseFields: TypeAlias = Literal["results", "answer", "duration_ms", "has_answer", "evaluation"]
 
 class QueryIndexResponse(Message[_QueryIndexResponseFields]):
     """
@@ -519,9 +589,13 @@ class QueryIndexResponse(Message[_QueryIndexResponseFields]):
             ```proto
             bool has_answer = 4;
             ```
+        evaluation:
+            ```proto
+            optional neutron.v1.EvaluationMetrics evaluation = 5;
+            ```
     """
 
-    __slots__ = ("results", "answer", "duration_ms", "has_answer")
+    __slots__ = ("results", "answer", "duration_ms", "has_answer", "evaluation")
 
     if TYPE_CHECKING:
 
@@ -532,6 +606,7 @@ class QueryIndexResponse(Message[_QueryIndexResponseFields]):
             answer: GroundedAnswer | None = None,
             duration_ms: int = 0,
             has_answer: bool = False,
+            evaluation: EvaluationMetrics | None = None,
         ) -> None:
             pass
 
@@ -539,6 +614,7 @@ class QueryIndexResponse(Message[_QueryIndexResponseFields]):
         answer: GroundedAnswer | None
         duration_ms: int
         has_answer: bool
+        evaluation: EvaluationMetrics | None
 
 _SynthesizeAnswerRequestFields: TypeAlias = Literal["query", "documents", "include_markdown", "max_sentences"]
 
@@ -586,7 +662,7 @@ class SynthesizeAnswerRequest(Message[_SynthesizeAnswerRequestFields]):
         include_markdown: bool
         max_sentences: int
 
-_SynthesizeAnswerResponseFields: TypeAlias = Literal["results", "answer", "has_answer"]
+_SynthesizeAnswerResponseFields: TypeAlias = Literal["results", "answer", "has_answer", "evaluation"]
 
 class SynthesizeAnswerResponse(Message[_SynthesizeAnswerResponseFields]):
     """
@@ -607,9 +683,13 @@ class SynthesizeAnswerResponse(Message[_SynthesizeAnswerResponseFields]):
             ```proto
             bool has_answer = 3;
             ```
+        evaluation:
+            ```proto
+            optional neutron.v1.EvaluationMetrics evaluation = 4;
+            ```
     """
 
-    __slots__ = ("results", "answer", "has_answer")
+    __slots__ = ("results", "answer", "has_answer", "evaluation")
 
     if TYPE_CHECKING:
 
@@ -619,12 +699,14 @@ class SynthesizeAnswerResponse(Message[_SynthesizeAnswerResponseFields]):
             results: list[SearchDocument] | None = None,
             answer: GroundedAnswer | None = None,
             has_answer: bool = False,
+            evaluation: EvaluationMetrics | None = None,
         ) -> None:
             pass
 
         results: list[SearchDocument]
         answer: GroundedAnswer | None
         has_answer: bool
+        evaluation: EvaluationMetrics | None
 
 _GetDocumentRequestFields: TypeAlias = Literal["url_hash"]
 
@@ -1440,7 +1522,7 @@ class GatewaySearchRequest(Message[_GatewaySearchRequestFields]):
         subpages: int
         subpage_targets: list[str]
 
-_GatewaySearchResponseFields: TypeAlias = Literal["query", "mode", "source", "total", "answer", "has_answer", "results"]
+_GatewaySearchResponseFields: TypeAlias = Literal["query", "mode", "source", "total", "answer", "has_answer", "results", "evaluation"]
 
 class GatewaySearchResponse(Message[_GatewaySearchResponseFields]):
     """
@@ -1477,9 +1559,13 @@ class GatewaySearchResponse(Message[_GatewaySearchResponseFields]):
             ```proto
             repeated neutron.v1.SearchDocument results = 7;
             ```
+        evaluation:
+            ```proto
+            optional neutron.v1.EvaluationMetrics evaluation = 8;
+            ```
     """
 
-    __slots__ = ("query", "mode", "source", "total", "answer", "has_answer", "results")
+    __slots__ = ("query", "mode", "source", "total", "answer", "has_answer", "results", "evaluation")
 
     if TYPE_CHECKING:
 
@@ -1493,6 +1579,7 @@ class GatewaySearchResponse(Message[_GatewaySearchResponseFields]):
             answer: GroundedAnswer | None = None,
             has_answer: bool = False,
             results: list[SearchDocument] | None = None,
+            evaluation: EvaluationMetrics | None = None,
         ) -> None:
             pass
 
@@ -1503,6 +1590,7 @@ class GatewaySearchResponse(Message[_GatewaySearchResponseFields]):
         answer: GroundedAnswer | None
         has_answer: bool
         results: list[SearchDocument]
+        evaluation: EvaluationMetrics | None
 
 _BatchGetDocumentsRequestFields: TypeAlias = Literal["urls", "url_hashes", "highlight_query", "max_characters", "subpages", "subpage_targets"]
 
@@ -1678,10 +1766,11 @@ class FindSimilarResponse(Message[_FindSimilarResponseFields]):
 
 
 _DESC = file_desc(
-    b'\n\x18neutron/v1/neutron.proto\x12\nneutron.v1"{\n\x08Citation\x12\x14\n\x05index\x18\x01 \x01(\x05R\x05index\x12\x10\n\x03url\x18\x02 \x01(\tR\x03url\x12\x19\n\x08url_hash\x18\x03 \x01(\tR\x07urlHash\x12\x14\n\x05title\x18\x04 \x01(\tR\x05title\x12\x16\n\x06domain\x18\x05 \x01(\tR\x06domain"r\n\x0eGroundedAnswer\x12\x18\n\x07summary\x18\x01 \x01(\tR\x07summary\x122\n\tcitations\x18\x02 \x03(\x0b2\x14.neutron.v1.CitationR\tcitations\x12\x12\n\x04mode\x18\x03 \x01(\tR\x04mode"]\n\x0fSubpageDocument\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12\x10\n\x03url\x18\x02 \x01(\tR\x03url\x12\x14\n\x05title\x18\x03 \x01(\tR\x05title\x12\x12\n\x04text\x18\x04 \x01(\tR\x04text"\xbd\x02\n\x0eSearchDocument\x12\x19\n\x08url_hash\x18\x01 \x01(\tR\x07urlHash\x12\x10\n\x03url\x18\x02 \x01(\tR\x03url\x12\x14\n\x05title\x18\x03 \x01(\tR\x05title\x12\x18\n\x07snippet\x18\x04 \x01(\tR\x07snippet\x12\x14\n\x05score\x18\x05 \x01(\x01R\x05score\x12\x1d\n\ncrawled_at\x18\x06 \x01(\tR\tcrawledAt\x12#\n\rfull_markdown\x18\x07 \x01(\tR\x0cfullMarkdown\x12\x1b\n\tfull_text\x18\x08 \x01(\tR\x08fullText\x12\x1e\n\nhighlights\x18\t \x03(\tR\nhighlights\x127\n\x08subpages\x18\n \x03(\x0b2\x1b.neutron.v1.SubpageDocumentR\x08subpages"\xcf\x01\n\rStatsSnapshot\x12#\n\rpages_indexed\x18\x01 \x01(\x03R\x0cpagesIndexed\x12\'\n\x0fdomains_covered\x18\x02 \x01(\x03R\x0edomainsCovered\x12)\n\x10frontier_pending\x18\x03 \x01(\x03R\x0ffrontierPending\x12\'\n\x0fpayloads_stored\x18\x04 \x01(\x03R\x0epayloadsStored\x12\x1c\n\tconnected\x18\x05 \x01(\x08R\tconnected"\x97\x01\n\x0fDiscoveryMetric\x12\x16\n\x06source\x18\x01 \x01(\tR\x06source\x12\x1d\n\nurls_found\x18\x02 \x01(\x05R\turlsFound\x12\x1f\n\x0bduration_ms\x18\x03 \x01(\x05R\ndurationMs\x12\x16\n\x06status\x18\x04 \x01(\tR\x06status\x12\x14\n\x05error\x18\x05 \x01(\tR\x05error"\xcc\x01\n\x0cCrawlOutcome\x12\x0e\n\x02ok\x18\x01 \x01(\x08R\x02ok\x12%\n\x0erobots_blocked\x18\x02 \x01(\x08R\rrobotsBlocked\x12\x14\n\x05error\x18\x03 \x01(\tR\x05error\x12\x16\n\x06domain\x18\x04 \x01(\tR\x06domain\x12\x1f\n\x0bduration_ms\x18\x05 \x01(\x05R\ndurationMs\x126\n\x08document\x18\x06 \x01(\x0b2\x1a.neutron.v1.SearchDocumentR\x08document"\xb2\x03\n\x11QueryIndexRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x14\n\x05limit\x18\x02 \x01(\x05R\x05limit\x12\x12\n\x04mode\x18\x03 \x01(\tR\x04mode\x12)\n\x10include_markdown\x18\x04 \x01(\x08R\x0fincludeMarkdown\x12\'\n\x0finclude_domains\x18\x05 \x03(\tR\x0eincludeDomains\x12\'\n\x0fexclude_domains\x18\x06 \x03(\tR\x0eexcludeDomains\x12\x1f\n\x0bsearch_type\x18\x07 \x01(\tR\nsearchType\x12\x1a\n\x08category\x18\x08 \x01(\tR\x08category\x120\n\x14start_published_date\x18\t \x01(\tR\x12startPublishedDate\x12,\n\x12end_published_date\x18\n \x01(\tR\x10endPublishedDate\x12\x1a\n\x08subpages\x18\x0b \x01(\x05R\x08subpages\x12\'\n\x0fsubpage_targets\x18\x0c \x03(\tR\x0esubpageTargets"\xbe\x01\n\x12QueryIndexResponse\x124\n\x07results\x18\x01 \x03(\x0b2\x1a.neutron.v1.SearchDocumentR\x07results\x122\n\x06answer\x18\x02 \x01(\x0b2\x1a.neutron.v1.GroundedAnswerR\x06answer\x12\x1f\n\x0bduration_ms\x18\x03 \x01(\x05R\ndurationMs\x12\x1d\n\nhas_answer\x18\x04 \x01(\x08R\thasAnswer"\xb9\x01\n\x17SynthesizeAnswerRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x128\n\tdocuments\x18\x02 \x03(\x0b2\x1a.neutron.v1.SearchDocumentR\tdocuments\x12)\n\x10include_markdown\x18\x03 \x01(\x08R\x0fincludeMarkdown\x12#\n\rmax_sentences\x18\x04 \x01(\x05R\x0cmaxSentences"\xa3\x01\n\x18SynthesizeAnswerResponse\x124\n\x07results\x18\x01 \x03(\x0b2\x1a.neutron.v1.SearchDocumentR\x07results\x122\n\x06answer\x18\x02 \x01(\x0b2\x1a.neutron.v1.GroundedAnswerR\x06answer\x12\x1d\n\nhas_answer\x18\x03 \x01(\x08R\thasAnswer"/\n\x12GetDocumentRequest\x12\x19\n\x08url_hash\x18\x01 \x01(\tR\x07urlHash"\xca\x01\n\x13GetDocumentResponse\x12\x14\n\x05found\x18\x01 \x01(\x08R\x05found\x12\x19\n\x08url_hash\x18\x02 \x01(\tR\x07urlHash\x12\x10\n\x03url\x18\x03 \x01(\tR\x03url\x12\x14\n\x05title\x18\x04 \x01(\tR\x05title\x12\x1d\n\ncrawled_at\x18\x05 \x01(\tR\tcrawledAt\x12#\n\rfull_markdown\x18\x06 \x01(\tR\x0cfullMarkdown\x12\x16\n\x06source\x18\x07 \x01(\tR\x06source"<\n\x0eSuggestRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x14\n\x05limit\x18\x02 \x01(\x05R\x05limit"I\n\x0fSuggestResponse\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12 \n\x0bsuggestions\x18\x02 \x03(\tR\x0bsuggestions"*\n\x12GetTrendingRequest\x12\x14\n\x05limit\x18\x01 \x01(\x05R\x05limit"9\n\rTrendingTopic\x12\x14\n\x05topic\x18\x01 \x01(\tR\x05topic\x12\x12\n\x04hits\x18\x02 \x01(\x03R\x04hits"L\n\x13GetTrendingResponse\x125\n\x08trending\x18\x01 \x03(\x0b2\x19.neutron.v1.TrendingTopicR\x08trending"\x11\n\x0fGetStatsRequest"C\n\x10GetStatsResponse\x12/\n\x05stats\x18\x01 \x01(\x0b2\x19.neutron.v1.StatsSnapshotR\x05stats"-\n\x15RecordHotTopicRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query"(\n\x16RecordHotTopicResponse\x12\x0e\n\x02ok\x18\x01 \x01(\x08R\x02ok"\xa9\x01\n\x17DiscoverAndCrawlRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x1b\n\tmax_pages\x18\x02 \x01(\x05R\x08maxPages\x12\x12\n\x04mode\x18\x03 \x01(\tR\x04mode\x12\x1b\n\tskip_urls\x18\x04 \x03(\tR\x08skipUrls\x12*\n\x11include_full_text\x18\x05 \x01(\x08R\x0fincludeFullText"\x8b\x01\n\x18DiscoverAndCrawlResponse\x128\n\tdocuments\x18\x01 \x03(\x0b2\x1a.neutron.v1.SearchDocumentR\tdocuments\x125\n\x07metrics\x18\x02 \x03(\x0b2\x1b.neutron.v1.DiscoveryMetricR\x07metrics"[\n\x14DiscoverSeedsRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x19\n\x08max_urls\x18\x02 \x01(\x05R\x07maxUrls\x12\x12\n\x04mode\x18\x03 \x01(\tR\x04mode"b\n\x15DiscoverSeedsResponse\x12\x12\n\x04urls\x18\x01 \x03(\tR\x04urls\x125\n\x07metrics\x18\x02 \x03(\x0b2\x1b.neutron.v1.DiscoveryMetricR\x07metrics"\xca\x01\n\x0fCrawlUrlRequest\x12\x10\n\x03url\x18\x01 \x01(\tR\x03url\x12\x14\n\x05query\x18\x02 \x01(\tR\x05query\x12\x1b\n\tfast_live\x18\x03 \x01(\x08R\x08fastLive\x12*\n\x11include_full_text\x18\x04 \x01(\x08R\x0fincludeFullText\x12!\n\x0ccheck_robots\x18\x05 \x01(\x08R\x0bcheckRobots\x12#\n\rforce_refresh\x18\x06 \x01(\x08R\x0cforceRefresh"F\n\x10CrawlUrlResponse\x122\n\x07outcome\x18\x01 \x01(\x0b2\x18.neutron.v1.CrawlOutcomeR\x07outcome"\xc9\x01\n\x12StreamCrawlRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x1b\n\tmax_pages\x18\x02 \x01(\x05R\x08maxPages\x12\x12\n\x04mode\x18\x03 \x01(\tR\x04mode\x12\x1b\n\tskip_urls\x18\x04 \x03(\tR\x08skipUrls\x12*\n\x11include_full_text\x18\x05 \x01(\x08R\x0fincludeFullText\x12#\n\rforce_refresh\x18\x06 \x01(\x08R\x0cforceRefresh"\xde\x01\n\x10CrawlStreamEvent\x12\x1d\n\nevent_type\x18\x01 \x01(\tR\teventType\x123\n\x06metric\x18\x02 \x01(\x0b2\x1b.neutron.v1.DiscoveryMetricR\x06metric\x122\n\x07outcome\x18\x03 \x01(\x0b2\x18.neutron.v1.CrawlOutcomeR\x07outcome\x12\x10\n\x03url\x18\x04 \x01(\tR\x03url\x12\x16\n\x06domain\x18\x05 \x01(\tR\x06domain\x12\x18\n\x07message\x18\x06 \x01(\tR\x07message"\xcf\x03\n\x14GatewaySearchRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x14\n\x05limit\x18\x02 \x01(\x05R\x05limit\x12\x12\n\x04mode\x18\x03 \x01(\tR\x04mode\x12)\n\x10include_markdown\x18\x04 \x01(\x08R\x0fincludeMarkdown\x12\x18\n\x07refresh\x18\x05 \x01(\x08R\x07refresh\x12\'\n\x0finclude_domains\x18\x06 \x03(\tR\x0eincludeDomains\x12\'\n\x0fexclude_domains\x18\x07 \x03(\tR\x0eexcludeDomains\x12\x1f\n\x0bsearch_type\x18\x08 \x01(\tR\nsearchType\x12\x1a\n\x08category\x18\t \x01(\tR\x08category\x120\n\x14start_published_date\x18\n \x01(\tR\x12startPublishedDate\x12,\n\x12end_published_date\x18\x0b \x01(\tR\x10endPublishedDate\x12\x1a\n\x08subpages\x18\x0c \x01(\x05R\x08subpages\x12\'\n\x0fsubpage_targets\x18\r \x03(\tR\x0esubpageTargets"\xf8\x01\n\x15GatewaySearchResponse\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x12\n\x04mode\x18\x02 \x01(\tR\x04mode\x12\x16\n\x06source\x18\x03 \x01(\tR\x06source\x12\x14\n\x05total\x18\x04 \x01(\x05R\x05total\x122\n\x06answer\x18\x05 \x01(\x0b2\x1a.neutron.v1.GroundedAnswerR\x06answer\x12\x1d\n\nhas_answer\x18\x06 \x01(\x08R\thasAnswer\x124\n\x07results\x18\x07 \x03(\x0b2\x1a.neutron.v1.SearchDocumentR\x07results"\xe2\x01\n\x18BatchGetDocumentsRequest\x12\x12\n\x04urls\x18\x01 \x03(\tR\x04urls\x12\x1d\n\nurl_hashes\x18\x02 \x03(\tR\turlHashes\x12\'\n\x0fhighlight_query\x18\x03 \x01(\tR\x0ehighlightQuery\x12%\n\x0emax_characters\x18\x04 \x01(\x05R\rmaxCharacters\x12\x1a\n\x08subpages\x18\x05 \x01(\x05R\x08subpages\x12\'\n\x0fsubpage_targets\x18\x06 \x03(\tR\x0esubpageTargets"U\n\x19BatchGetDocumentsResponse\x128\n\tdocuments\x18\x01 \x03(\x0b2\x1a.neutron.v1.SearchDocumentR\tdocuments"\xd0\x01\n\x12FindSimilarRequest\x12\x10\n\x03url\x18\x01 \x01(\tR\x03url\x12\x19\n\x08url_hash\x18\x02 \x01(\tR\x07urlHash\x12\x14\n\x05limit\x18\x03 \x01(\x05R\x05limit\x122\n\x15exclude_source_domain\x18\x04 \x01(\x08R\x13excludeSourceDomain\x12\x1a\n\x08subpages\x18\x05 \x01(\x05R\x08subpages\x12\'\n\x0fsubpage_targets\x18\x06 \x03(\tR\x0esubpageTargets"K\n\x13FindSimilarResponse\x124\n\x07results\x18\x01 \x03(\x0b2\x1a.neutron.v1.SearchDocumentR\x07results2\xf1\x05\n\rSearchService\x12K\n\nQueryIndex\x12\x1d.neutron.v1.QueryIndexRequest\x1a\x1e.neutron.v1.QueryIndexResponse\x12]\n\x10SynthesizeAnswer\x12#.neutron.v1.SynthesizeAnswerRequest\x1a$.neutron.v1.SynthesizeAnswerResponse\x12N\n\x0bGetDocument\x12\x1e.neutron.v1.GetDocumentRequest\x1a\x1f.neutron.v1.GetDocumentResponse\x12`\n\x11BatchGetDocuments\x12$.neutron.v1.BatchGetDocumentsRequest\x1a%.neutron.v1.BatchGetDocumentsResponse\x12N\n\x0bFindSimilar\x12\x1e.neutron.v1.FindSimilarRequest\x1a\x1f.neutron.v1.FindSimilarResponse\x12B\n\x07Suggest\x12\x1a.neutron.v1.SuggestRequest\x1a\x1b.neutron.v1.SuggestResponse\x12N\n\x0bGetTrending\x12\x1e.neutron.v1.GetTrendingRequest\x1a\x1f.neutron.v1.GetTrendingResponse\x12E\n\x08GetStats\x12\x1b.neutron.v1.GetStatsRequest\x1a\x1c.neutron.v1.GetStatsResponse\x12W\n\x0eRecordHotTopic\x12!.neutron.v1.RecordHotTopicRequest\x1a".neutron.v1.RecordHotTopicResponse2\xdb\x02\n\x0eCrawlerService\x12]\n\x10DiscoverAndCrawl\x12#.neutron.v1.DiscoverAndCrawlRequest\x1a$.neutron.v1.DiscoverAndCrawlResponse\x12T\n\rDiscoverSeeds\x12 .neutron.v1.DiscoverSeedsRequest\x1a!.neutron.v1.DiscoverSeedsResponse\x12E\n\x08CrawlUrl\x12\x1b.neutron.v1.CrawlUrlRequest\x1a\x1c.neutron.v1.CrawlUrlResponse\x12M\n\x0bStreamCrawl\x12\x1e.neutron.v1.StreamCrawlRequest\x1a\x1c.neutron.v1.CrawlStreamEvent0\x012\xec\x03\n\x0eGatewayService\x12M\n\x06Search\x12 .neutron.v1.GatewaySearchRequest\x1a!.neutron.v1.GatewaySearchResponse\x12`\n\x11BatchGetDocuments\x12$.neutron.v1.BatchGetDocumentsRequest\x1a%.neutron.v1.BatchGetDocumentsResponse\x12N\n\x0bFindSimilar\x12\x1e.neutron.v1.FindSimilarRequest\x1a\x1f.neutron.v1.FindSimilarResponse\x12B\n\x07Suggest\x12\x1a.neutron.v1.SuggestRequest\x1a\x1b.neutron.v1.SuggestResponse\x12E\n\x08GetStats\x12\x1b.neutron.v1.GetStatsRequest\x1a\x1c.neutron.v1.GetStatsResponse\x12N\n\x0bGetDocument\x12\x1e.neutron.v1.GetDocumentRequest\x1a\x1f.neutron.v1.GetDocumentResponseb\x06proto3',
+    b'\n\x18neutron/v1/neutron.proto\x12\nneutron.v1"{\n\x08Citation\x12\x14\n\x05index\x18\x01 \x01(\x05R\x05index\x12\x10\n\x03url\x18\x02 \x01(\tR\x03url\x12\x19\n\x08url_hash\x18\x03 \x01(\tR\x07urlHash\x12\x14\n\x05title\x18\x04 \x01(\tR\x05title\x12\x16\n\x06domain\x18\x05 \x01(\tR\x06domain"\xca\x02\n\x11EvaluationMetrics\x12)\n\x10confidence_score\x18\x01 \x01(\x01R\x0fconfidenceScore\x12%\n\x0equery_coverage\x18\x02 \x01(\x01R\rqueryCoverage\x125\n\x16grounding_faithfulness\x18\x03 \x01(\x01R\x15groundingFaithfulness\x12\'\n\x0frelevance_grade\x18\x04 \x01(\tR\x0erelevanceGrade\x12)\n\x10matched_concepts\x18\x05 \x03(\tR\x0fmatchedConcepts\x12)\n\x10missing_concepts\x18\x06 \x03(\tR\x0fmissingConcepts\x12-\n\x12evaluation_summary\x18\x07 \x01(\tR\x11evaluationSummary"\xb1\x01\n\x0eGroundedAnswer\x12\x18\n\x07summary\x18\x01 \x01(\tR\x07summary\x122\n\tcitations\x18\x02 \x03(\x0b2\x14.neutron.v1.CitationR\tcitations\x12\x12\n\x04mode\x18\x03 \x01(\tR\x04mode\x12=\n\nevaluation\x18\x04 \x01(\x0b2\x1d.neutron.v1.EvaluationMetricsR\nevaluation"]\n\x0fSubpageDocument\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12\x10\n\x03url\x18\x02 \x01(\tR\x03url\x12\x14\n\x05title\x18\x03 \x01(\tR\x05title\x12\x12\n\x04text\x18\x04 \x01(\tR\x04text"\xbd\x02\n\x0eSearchDocument\x12\x19\n\x08url_hash\x18\x01 \x01(\tR\x07urlHash\x12\x10\n\x03url\x18\x02 \x01(\tR\x03url\x12\x14\n\x05title\x18\x03 \x01(\tR\x05title\x12\x18\n\x07snippet\x18\x04 \x01(\tR\x07snippet\x12\x14\n\x05score\x18\x05 \x01(\x01R\x05score\x12\x1d\n\ncrawled_at\x18\x06 \x01(\tR\tcrawledAt\x12#\n\rfull_markdown\x18\x07 \x01(\tR\x0cfullMarkdown\x12\x1b\n\tfull_text\x18\x08 \x01(\tR\x08fullText\x12\x1e\n\nhighlights\x18\t \x03(\tR\nhighlights\x127\n\x08subpages\x18\n \x03(\x0b2\x1b.neutron.v1.SubpageDocumentR\x08subpages"\xcf\x01\n\rStatsSnapshot\x12#\n\rpages_indexed\x18\x01 \x01(\x03R\x0cpagesIndexed\x12\'\n\x0fdomains_covered\x18\x02 \x01(\x03R\x0edomainsCovered\x12)\n\x10frontier_pending\x18\x03 \x01(\x03R\x0ffrontierPending\x12\'\n\x0fpayloads_stored\x18\x04 \x01(\x03R\x0epayloadsStored\x12\x1c\n\tconnected\x18\x05 \x01(\x08R\tconnected"\x97\x01\n\x0fDiscoveryMetric\x12\x16\n\x06source\x18\x01 \x01(\tR\x06source\x12\x1d\n\nurls_found\x18\x02 \x01(\x05R\turlsFound\x12\x1f\n\x0bduration_ms\x18\x03 \x01(\x05R\ndurationMs\x12\x16\n\x06status\x18\x04 \x01(\tR\x06status\x12\x14\n\x05error\x18\x05 \x01(\tR\x05error"\xcc\x01\n\x0cCrawlOutcome\x12\x0e\n\x02ok\x18\x01 \x01(\x08R\x02ok\x12%\n\x0erobots_blocked\x18\x02 \x01(\x08R\rrobotsBlocked\x12\x14\n\x05error\x18\x03 \x01(\tR\x05error\x12\x16\n\x06domain\x18\x04 \x01(\tR\x06domain\x12\x1f\n\x0bduration_ms\x18\x05 \x01(\x05R\ndurationMs\x126\n\x08document\x18\x06 \x01(\x0b2\x1a.neutron.v1.SearchDocumentR\x08document"\xb2\x03\n\x11QueryIndexRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x14\n\x05limit\x18\x02 \x01(\x05R\x05limit\x12\x12\n\x04mode\x18\x03 \x01(\tR\x04mode\x12)\n\x10include_markdown\x18\x04 \x01(\x08R\x0fincludeMarkdown\x12\'\n\x0finclude_domains\x18\x05 \x03(\tR\x0eincludeDomains\x12\'\n\x0fexclude_domains\x18\x06 \x03(\tR\x0eexcludeDomains\x12\x1f\n\x0bsearch_type\x18\x07 \x01(\tR\nsearchType\x12\x1a\n\x08category\x18\x08 \x01(\tR\x08category\x120\n\x14start_published_date\x18\t \x01(\tR\x12startPublishedDate\x12,\n\x12end_published_date\x18\n \x01(\tR\x10endPublishedDate\x12\x1a\n\x08subpages\x18\x0b \x01(\x05R\x08subpages\x12\'\n\x0fsubpage_targets\x18\x0c \x03(\tR\x0esubpageTargets"\xfd\x01\n\x12QueryIndexResponse\x124\n\x07results\x18\x01 \x03(\x0b2\x1a.neutron.v1.SearchDocumentR\x07results\x122\n\x06answer\x18\x02 \x01(\x0b2\x1a.neutron.v1.GroundedAnswerR\x06answer\x12\x1f\n\x0bduration_ms\x18\x03 \x01(\x05R\ndurationMs\x12\x1d\n\nhas_answer\x18\x04 \x01(\x08R\thasAnswer\x12=\n\nevaluation\x18\x05 \x01(\x0b2\x1d.neutron.v1.EvaluationMetricsR\nevaluation"\xb9\x01\n\x17SynthesizeAnswerRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x128\n\tdocuments\x18\x02 \x03(\x0b2\x1a.neutron.v1.SearchDocumentR\tdocuments\x12)\n\x10include_markdown\x18\x03 \x01(\x08R\x0fincludeMarkdown\x12#\n\rmax_sentences\x18\x04 \x01(\x05R\x0cmaxSentences"\xe2\x01\n\x18SynthesizeAnswerResponse\x124\n\x07results\x18\x01 \x03(\x0b2\x1a.neutron.v1.SearchDocumentR\x07results\x122\n\x06answer\x18\x02 \x01(\x0b2\x1a.neutron.v1.GroundedAnswerR\x06answer\x12\x1d\n\nhas_answer\x18\x03 \x01(\x08R\thasAnswer\x12=\n\nevaluation\x18\x04 \x01(\x0b2\x1d.neutron.v1.EvaluationMetricsR\nevaluation"/\n\x12GetDocumentRequest\x12\x19\n\x08url_hash\x18\x01 \x01(\tR\x07urlHash"\xca\x01\n\x13GetDocumentResponse\x12\x14\n\x05found\x18\x01 \x01(\x08R\x05found\x12\x19\n\x08url_hash\x18\x02 \x01(\tR\x07urlHash\x12\x10\n\x03url\x18\x03 \x01(\tR\x03url\x12\x14\n\x05title\x18\x04 \x01(\tR\x05title\x12\x1d\n\ncrawled_at\x18\x05 \x01(\tR\tcrawledAt\x12#\n\rfull_markdown\x18\x06 \x01(\tR\x0cfullMarkdown\x12\x16\n\x06source\x18\x07 \x01(\tR\x06source"<\n\x0eSuggestRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x14\n\x05limit\x18\x02 \x01(\x05R\x05limit"I\n\x0fSuggestResponse\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12 \n\x0bsuggestions\x18\x02 \x03(\tR\x0bsuggestions"*\n\x12GetTrendingRequest\x12\x14\n\x05limit\x18\x01 \x01(\x05R\x05limit"9\n\rTrendingTopic\x12\x14\n\x05topic\x18\x01 \x01(\tR\x05topic\x12\x12\n\x04hits\x18\x02 \x01(\x03R\x04hits"L\n\x13GetTrendingResponse\x125\n\x08trending\x18\x01 \x03(\x0b2\x19.neutron.v1.TrendingTopicR\x08trending"\x11\n\x0fGetStatsRequest"C\n\x10GetStatsResponse\x12/\n\x05stats\x18\x01 \x01(\x0b2\x19.neutron.v1.StatsSnapshotR\x05stats"-\n\x15RecordHotTopicRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query"(\n\x16RecordHotTopicResponse\x12\x0e\n\x02ok\x18\x01 \x01(\x08R\x02ok"\xa9\x01\n\x17DiscoverAndCrawlRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x1b\n\tmax_pages\x18\x02 \x01(\x05R\x08maxPages\x12\x12\n\x04mode\x18\x03 \x01(\tR\x04mode\x12\x1b\n\tskip_urls\x18\x04 \x03(\tR\x08skipUrls\x12*\n\x11include_full_text\x18\x05 \x01(\x08R\x0fincludeFullText"\x8b\x01\n\x18DiscoverAndCrawlResponse\x128\n\tdocuments\x18\x01 \x03(\x0b2\x1a.neutron.v1.SearchDocumentR\tdocuments\x125\n\x07metrics\x18\x02 \x03(\x0b2\x1b.neutron.v1.DiscoveryMetricR\x07metrics"[\n\x14DiscoverSeedsRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x19\n\x08max_urls\x18\x02 \x01(\x05R\x07maxUrls\x12\x12\n\x04mode\x18\x03 \x01(\tR\x04mode"b\n\x15DiscoverSeedsResponse\x12\x12\n\x04urls\x18\x01 \x03(\tR\x04urls\x125\n\x07metrics\x18\x02 \x03(\x0b2\x1b.neutron.v1.DiscoveryMetricR\x07metrics"\xca\x01\n\x0fCrawlUrlRequest\x12\x10\n\x03url\x18\x01 \x01(\tR\x03url\x12\x14\n\x05query\x18\x02 \x01(\tR\x05query\x12\x1b\n\tfast_live\x18\x03 \x01(\x08R\x08fastLive\x12*\n\x11include_full_text\x18\x04 \x01(\x08R\x0fincludeFullText\x12!\n\x0ccheck_robots\x18\x05 \x01(\x08R\x0bcheckRobots\x12#\n\rforce_refresh\x18\x06 \x01(\x08R\x0cforceRefresh"F\n\x10CrawlUrlResponse\x122\n\x07outcome\x18\x01 \x01(\x0b2\x18.neutron.v1.CrawlOutcomeR\x07outcome"\xc9\x01\n\x12StreamCrawlRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x1b\n\tmax_pages\x18\x02 \x01(\x05R\x08maxPages\x12\x12\n\x04mode\x18\x03 \x01(\tR\x04mode\x12\x1b\n\tskip_urls\x18\x04 \x03(\tR\x08skipUrls\x12*\n\x11include_full_text\x18\x05 \x01(\x08R\x0fincludeFullText\x12#\n\rforce_refresh\x18\x06 \x01(\x08R\x0cforceRefresh"\xde\x01\n\x10CrawlStreamEvent\x12\x1d\n\nevent_type\x18\x01 \x01(\tR\teventType\x123\n\x06metric\x18\x02 \x01(\x0b2\x1b.neutron.v1.DiscoveryMetricR\x06metric\x122\n\x07outcome\x18\x03 \x01(\x0b2\x18.neutron.v1.CrawlOutcomeR\x07outcome\x12\x10\n\x03url\x18\x04 \x01(\tR\x03url\x12\x16\n\x06domain\x18\x05 \x01(\tR\x06domain\x12\x18\n\x07message\x18\x06 \x01(\tR\x07message"\xcf\x03\n\x14GatewaySearchRequest\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x14\n\x05limit\x18\x02 \x01(\x05R\x05limit\x12\x12\n\x04mode\x18\x03 \x01(\tR\x04mode\x12)\n\x10include_markdown\x18\x04 \x01(\x08R\x0fincludeMarkdown\x12\x18\n\x07refresh\x18\x05 \x01(\x08R\x07refresh\x12\'\n\x0finclude_domains\x18\x06 \x03(\tR\x0eincludeDomains\x12\'\n\x0fexclude_domains\x18\x07 \x03(\tR\x0eexcludeDomains\x12\x1f\n\x0bsearch_type\x18\x08 \x01(\tR\nsearchType\x12\x1a\n\x08category\x18\t \x01(\tR\x08category\x120\n\x14start_published_date\x18\n \x01(\tR\x12startPublishedDate\x12,\n\x12end_published_date\x18\x0b \x01(\tR\x10endPublishedDate\x12\x1a\n\x08subpages\x18\x0c \x01(\x05R\x08subpages\x12\'\n\x0fsubpage_targets\x18\r \x03(\tR\x0esubpageTargets"\xb7\x02\n\x15GatewaySearchResponse\x12\x14\n\x05query\x18\x01 \x01(\tR\x05query\x12\x12\n\x04mode\x18\x02 \x01(\tR\x04mode\x12\x16\n\x06source\x18\x03 \x01(\tR\x06source\x12\x14\n\x05total\x18\x04 \x01(\x05R\x05total\x122\n\x06answer\x18\x05 \x01(\x0b2\x1a.neutron.v1.GroundedAnswerR\x06answer\x12\x1d\n\nhas_answer\x18\x06 \x01(\x08R\thasAnswer\x124\n\x07results\x18\x07 \x03(\x0b2\x1a.neutron.v1.SearchDocumentR\x07results\x12=\n\nevaluation\x18\x08 \x01(\x0b2\x1d.neutron.v1.EvaluationMetricsR\nevaluation"\xe2\x01\n\x18BatchGetDocumentsRequest\x12\x12\n\x04urls\x18\x01 \x03(\tR\x04urls\x12\x1d\n\nurl_hashes\x18\x02 \x03(\tR\turlHashes\x12\'\n\x0fhighlight_query\x18\x03 \x01(\tR\x0ehighlightQuery\x12%\n\x0emax_characters\x18\x04 \x01(\x05R\rmaxCharacters\x12\x1a\n\x08subpages\x18\x05 \x01(\x05R\x08subpages\x12\'\n\x0fsubpage_targets\x18\x06 \x03(\tR\x0esubpageTargets"U\n\x19BatchGetDocumentsResponse\x128\n\tdocuments\x18\x01 \x03(\x0b2\x1a.neutron.v1.SearchDocumentR\tdocuments"\xd0\x01\n\x12FindSimilarRequest\x12\x10\n\x03url\x18\x01 \x01(\tR\x03url\x12\x19\n\x08url_hash\x18\x02 \x01(\tR\x07urlHash\x12\x14\n\x05limit\x18\x03 \x01(\x05R\x05limit\x122\n\x15exclude_source_domain\x18\x04 \x01(\x08R\x13excludeSourceDomain\x12\x1a\n\x08subpages\x18\x05 \x01(\x05R\x08subpages\x12\'\n\x0fsubpage_targets\x18\x06 \x03(\tR\x0esubpageTargets"K\n\x13FindSimilarResponse\x124\n\x07results\x18\x01 \x03(\x0b2\x1a.neutron.v1.SearchDocumentR\x07results2\xf1\x05\n\rSearchService\x12K\n\nQueryIndex\x12\x1d.neutron.v1.QueryIndexRequest\x1a\x1e.neutron.v1.QueryIndexResponse\x12]\n\x10SynthesizeAnswer\x12#.neutron.v1.SynthesizeAnswerRequest\x1a$.neutron.v1.SynthesizeAnswerResponse\x12N\n\x0bGetDocument\x12\x1e.neutron.v1.GetDocumentRequest\x1a\x1f.neutron.v1.GetDocumentResponse\x12`\n\x11BatchGetDocuments\x12$.neutron.v1.BatchGetDocumentsRequest\x1a%.neutron.v1.BatchGetDocumentsResponse\x12N\n\x0bFindSimilar\x12\x1e.neutron.v1.FindSimilarRequest\x1a\x1f.neutron.v1.FindSimilarResponse\x12B\n\x07Suggest\x12\x1a.neutron.v1.SuggestRequest\x1a\x1b.neutron.v1.SuggestResponse\x12N\n\x0bGetTrending\x12\x1e.neutron.v1.GetTrendingRequest\x1a\x1f.neutron.v1.GetTrendingResponse\x12E\n\x08GetStats\x12\x1b.neutron.v1.GetStatsRequest\x1a\x1c.neutron.v1.GetStatsResponse\x12W\n\x0eRecordHotTopic\x12!.neutron.v1.RecordHotTopicRequest\x1a".neutron.v1.RecordHotTopicResponse2\xdb\x02\n\x0eCrawlerService\x12]\n\x10DiscoverAndCrawl\x12#.neutron.v1.DiscoverAndCrawlRequest\x1a$.neutron.v1.DiscoverAndCrawlResponse\x12T\n\rDiscoverSeeds\x12 .neutron.v1.DiscoverSeedsRequest\x1a!.neutron.v1.DiscoverSeedsResponse\x12E\n\x08CrawlUrl\x12\x1b.neutron.v1.CrawlUrlRequest\x1a\x1c.neutron.v1.CrawlUrlResponse\x12M\n\x0bStreamCrawl\x12\x1e.neutron.v1.StreamCrawlRequest\x1a\x1c.neutron.v1.CrawlStreamEvent0\x012\xec\x03\n\x0eGatewayService\x12M\n\x06Search\x12 .neutron.v1.GatewaySearchRequest\x1a!.neutron.v1.GatewaySearchResponse\x12`\n\x11BatchGetDocuments\x12$.neutron.v1.BatchGetDocumentsRequest\x1a%.neutron.v1.BatchGetDocumentsResponse\x12N\n\x0bFindSimilar\x12\x1e.neutron.v1.FindSimilarRequest\x1a\x1f.neutron.v1.FindSimilarResponse\x12B\n\x07Suggest\x12\x1a.neutron.v1.SuggestRequest\x1a\x1b.neutron.v1.SuggestResponse\x12E\n\x08GetStats\x12\x1b.neutron.v1.GetStatsRequest\x1a\x1c.neutron.v1.GetStatsResponse\x12N\n\x0bGetDocument\x12\x1e.neutron.v1.GetDocumentRequest\x1a\x1f.neutron.v1.GetDocumentResponseb\x06proto3',
     [],
     {
         "Citation": Citation,
+        "EvaluationMetrics": EvaluationMetrics,
         "GroundedAnswer": GroundedAnswer,
         "SubpageDocument": SubpageDocument,
         "SearchDocument": SearchDocument,

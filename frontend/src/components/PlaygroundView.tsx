@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import {
+  Activity,
   ArrowLeft,
   Check,
   Code2,
@@ -7,6 +8,7 @@ import {
   ExternalLink,
   Layers,
   Play,
+  ShieldCheck,
   Sparkles,
 } from "lucide-react";
 import { apiUrl } from "../utils/api";
@@ -54,51 +56,54 @@ export const PlaygroundView: React.FC<PlaygroundViewProps> = ({ onBack }) => {
       : "http://localhost:8000";
 
   // Build Python code snippet
-  const pythonSnippet = `from exa_py import Exa
+  const pythonSnippet = `import requests
 
-# Drop-in compatible with Exa API:
-exa = Exa(api_key="your_api_key", base_url="${currentOrigin}")
-
-response = exa.search_and_contents(
-    "${query.replace(/"/g, '\\"')}",
-    type="${searchType}",
-    num_results=${numResults},${
-      category !== "all" ? `\n    category="${category}",` : ""
+# Query Neutron Agent Retrieval API:
+url = "${currentOrigin}/search"
+payload = {
+    "query": "${query.replace(/"/g, '\\"')}",
+    "type": "${searchType}",
+    "numResults": ${numResults},${
+      category !== "all" ? `\n    "category": "${category}",` : ""
     }${
       includeDomains
-        ? `\n    include_domains=[${includeDomains
+        ? `\n    "includeDomains": [${includeDomains
             .split(",")
             .map((d) => `"${d.trim()}"`)
             .join(", ")}],`
         : ""
     }${
       excludeDomains
-        ? `\n    exclude_domains=[${excludeDomains
+        ? `\n    "excludeDomains": [${excludeDomains
             .split(",")
             .map((d) => `"${d.trim()}"`)
             .join(", ")}],`
         : ""
     }
-    text=${includeText ? "True" : "False"},
-    highlights=${includeHighlights ? "True" : "False"},
-    subpages=${subpages},${
+    "contents": {
+        "text": ${includeText ? "True" : "False"},
+        "highlights": ${includeHighlights ? "True" : "False"},
+        "subpages": ${subpages},${
       subpages > 0 && subpageTargets
-        ? `\n    subpage_target=[${subpageTargets
+        ? `\n        "subpageTarget": [${subpageTargets
             .split(",")
             .map((t) => `"${t.trim()}"`)
             .join(", ")}],`
         : ""
     }
-    livecrawl="${livecrawl}"
-)
+        "livecrawl": "${livecrawl}",
+    },
+}
 
-print(f"Resolved search type: {response.resolved_search_type}")
-for result in response.results:
-    print(f"[{result.score:.2f}] {result.title} -> {result.url}")
-    if hasattr(result, "highlights"):
-        print("Highlights:", result.highlights)
-    if hasattr(result, "subpages"):
-        print("Subpages:", [sp.title for sp in result.subpages])
+response = requests.post(url, json=payload).json()
+print("Resolved Search Type:", response.get("resolvedSearchType"))
+print("Evaluation:", response.get("evaluation"))
+for result in response.get("results", []):
+    print(f"[{result.get('score', 0):.2f}] {result.get('title')} -> {result.get('url')}")
+    if result.get("highlights"):
+        print("  Highlights:", result.get("highlights"))
+    if result.get("subpages"):
+        print("  Subpages:", [sp.get("title") for sp in result.get("subpages")])
 `;
 
   // Build cURL code snippet
@@ -261,9 +266,9 @@ console.log(data);`;
           <div className="h-4 w-px bg-white/10" />
           <h1 className="text-lg font-medium text-white flex items-center gap-2">
             <Code2 className="w-5 h-5 text-neutral-300" />
-            <span>Exa API Playground</span>
+            <span>Neutron Retrieval Playground</span>
             <span className="text-[11px] font-mono-tech px-2 py-0.5 rounded bg-white/[0.08] text-neutral-300">
-              v3.0 Drop-In
+              Agent API v3.0
             </span>
           </h1>
         </div>
@@ -493,7 +498,7 @@ console.log(data);`;
                     }`}
                   >
                     {tab === "python"
-                      ? "Python (exa-py)"
+                      ? "Python (Requests)"
                       : tab === "curl"
                         ? "cURL"
                         : "TypeScript"}
@@ -583,7 +588,7 @@ console.log(data);`;
                 <div className="h-64 flex flex-col items-center justify-center gap-3 text-neutral-400">
                   <div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin" />
                   <span className="text-xs font-mono-tech">
-                    Executing Exa search pipeline...
+                    Executing Neutron search pipeline...
                   </span>
                 </div>
               ) : errorMsg ? (
@@ -597,8 +602,8 @@ console.log(data);`;
                     Playground ready. Click "Execute Request" to run.
                   </p>
                   <p className="text-xs text-neutral-600">
-                    Sends official Exa-shaped POST payload with subpage
-                    traversal and highlight extraction.
+                    Sends structured POST payload with subpage
+                    traversal, highlight extraction, and grounded evaluation metrics.
                   </p>
                 </div>
               ) : activeViewTab === "json" ? (
@@ -607,6 +612,89 @@ console.log(data);`;
                 </pre>
               ) : (
                 <div className="space-y-4">
+                  {responseJson.evaluation && (
+                    <div className="p-3.5 rounded-lg bg-white/[0.04] border border-white/10 space-y-2.5">
+                      <div className="flex items-center justify-between text-xs font-mono-tech">
+                        <span className="flex items-center gap-1.5 text-neutral-300">
+                          <Activity className="w-3.5 h-3.5 text-neutral-400" />
+                          Evaluation Metrics
+                        </span>
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border ${
+                            responseJson.evaluation.relevance_grade === "High"
+                              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                              : responseJson.evaluation.relevance_grade === "Low"
+                              ? "border-rose-500/30 bg-rose-500/10 text-rose-300"
+                              : "border-amber-500/30 bg-amber-500/10 text-amber-300"
+                          }`}
+                        >
+                          <ShieldCheck className="w-3 h-3" />
+                          <span>
+                            Grade: {responseJson.evaluation.relevance_grade || "Moderate"} (
+                            {responseJson.evaluation.confidence_percent ??
+                              Math.round(
+                                (responseJson.evaluation.confidence_score || 0) * 100,
+                              )}
+                            %)
+                          </span>
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 pt-1 font-mono-tech text-[11px]">
+                        <div className="p-2 rounded bg-black/40 border border-white/5">
+                          <div className="text-neutral-500 text-[10px]">Confidence</div>
+                          <div className="text-white font-medium">
+                            {responseJson.evaluation.confidence_percent ??
+                              Math.round(
+                                (responseJson.evaluation.confidence_score || 0) * 100,
+                              )}
+                            %
+                          </div>
+                        </div>
+                        <div className="p-2 rounded bg-black/40 border border-white/5">
+                          <div className="text-neutral-500 text-[10px]">Query Coverage</div>
+                          <div className="text-white font-medium">
+                            {Math.round(
+                              (responseJson.evaluation.query_coverage || 0) * 100,
+                            )}
+                            %
+                          </div>
+                        </div>
+                        <div className="p-2 rounded bg-black/40 border border-white/5">
+                          <div className="text-neutral-500 text-[10px]">Grounding</div>
+                          <div className="text-white font-medium">
+                            {Math.round(
+                              (responseJson.evaluation.grounding_faithfulness || 0) * 100,
+                            )}
+                            %
+                          </div>
+                        </div>
+                      </div>
+
+                      {responseJson.evaluation.matched_concepts?.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1 pt-1">
+                          <span className="text-[10px] font-mono-tech text-neutral-500 mr-1">
+                            Concepts:
+                          </span>
+                          {responseJson.evaluation.matched_concepts.map((c: string) => (
+                            <span
+                              key={c}
+                              className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 font-mono-tech text-[10px]"
+                            >
+                              ✓ {c}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {responseJson.evaluation.evaluation_summary && (
+                        <p className="text-[11px] text-neutral-400 italic pt-0.5">
+                          {responseJson.evaluation.evaluation_summary}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   {responseJson.answer && (
                     <div className="p-3.5 rounded-lg bg-white/[0.04] border border-white/10 mb-4">
                       <div className="text-[11px] font-mono-tech text-neutral-400 uppercase tracking-wider mb-1">

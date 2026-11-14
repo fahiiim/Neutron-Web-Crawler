@@ -74,59 +74,71 @@ For full component, sequence, ranking, database schema, security, and cold-start
 | `GET /trending` | GET | Top recent hot topics from Turso |
 | `GET /suggest?q=...` | GET | Query autocomplete suggestions |
 | `GET /search` | GET | Unified hybrid search JSON (`results`, `answer`, `timings`, `cache_hit`, `request_id`) |
-| `POST /search` | POST | **Exa-compatible drop-in search** (`type: auto|keyword|neural`, `numResults`, `category`, `contents`, `subpages`) |
-| `POST /contents` | POST | **Exa-compatible batch document extraction** returning clean Markdown, highlights, and subpages |
-| `POST /findSimilar` | POST | **Exa-compatible similarity search** by seed URL topic and SimHash |
+| `POST /search` | POST | **Unified Agent Retrieval search** (`type: auto|keyword|neural`, `numResults`, `category`, `contents`, `subpages`) |
+| `POST /contents` | POST | **Agent-grade batch document extraction** returning clean Markdown, highlights, and subpages |
+| `POST /findSimilar` | POST | **Similarity search** by seed URL topic and SimHash |
 | `GET /search/stream` | GET | Server-Sent Events (SSE) stream backed by `QueryIndex` + `CrawlerService.StreamCrawl` |
 | `GET /api/research` | GET | Developer & AI-Agent JSON endpoint returning grounded answer + full Markdown `sources` |
 | `GET /doc/{url_hash}` | GET | Decompressed Markdown article from `page_payloads` (`64-bit` string hash safe in JS) |
 
 ---
 
-## Exa-Compatible AI Retrieval API (`exa-py` Drop-In)
+## Neutron Agent Retrieval API (Unified Agent Protocol)
 
-Neutron natively supports the official Exa SDK protocol, allowing AI agents (LangChain `ExaSearchRetriever`, LlamaIndex, AutoGen) to use Neutron as an open, private drop-in replacement:
+Neutron natively supports an open, high-performance agent retrieval protocol, allowing AI agents (LangChain, LlamaIndex, AutoGen, and custom ReAct loops) to query the index and live web with full provenance:
 
 ```python
-from exa_py import Exa
+import requests
 
 # Connect to your Neutron Gateway instance:
-exa = Exa(api_key="neutron_key", base_url="https://neutron-gateway.onrender.com")
+url = "https://neutron-gateway.onrender.com/search"
 
-# 1. Search with automated intent routing & full document hydration:
-response = exa.search_and_contents(
-    "papers on autonomous agent reasoning",
-    type="auto",          # Heuristic router: "keyword" (BM25) vs "neural" (semantic hybrid)
-    category="research paper",
-    num_results=5,
-    text=True,            # Extract clean, ad-free Markdown
-    highlights=True,      # Extract contextual snippet highlights
-    subpages=2,           # Traverse & hydrate up to 2 internal child docs/pricing/guides
-    subpage_target=["docs", "guides", "api"]
-)
+# 1. Search with automated intent routing, subpage traversal & evaluation metrics:
+payload = {
+    "query": "papers on autonomous agent reasoning",
+    "type": "auto",          # Heuristic router: "keyword" (BM25) vs "neural" (semantic hybrid)
+    "category": "research paper",
+    "numResults": 5,
+    "contents": {
+        "text": True,            # Extract clean, ad-free Markdown
+        "highlights": True,      # Extract contextual snippet highlights
+        "subpages": 2,           # Traverse & hydrate up to 2 internal child docs/pricing/guides
+        "subpageTarget": ["docs", "guides", "api"],
+        "livecrawl": "fallback"
+    }
+}
 
-print(f"Resolved Search Type: {response.resolved_search_type}")
-for res in response.results:
-    print(f"[{res.score:.2f}] {res.title} -> {res.url}")
-    print("Highlights:", getattr(res, "highlights", []))
-    print("Subpages:", [sp.title for sp in getattr(res, "subpages", [])])
+response = requests.post(url, json=payload).json()
+
+print(f"Resolved Search Type: {response.get('resolvedSearchType')}")
+print(f"Evaluation Metrics: {response.get('evaluation')}")
+for res in response.get("results", []):
+    print(f"[{res.get('score', 0):.2f}] {res.get('title')} -> {res.get('url')}")
+    print("Highlights:", res.get("highlights", []))
+    print("Subpages:", [sp.get("title") for sp in res.get("subpages", [])])
 
 # 2. Batch content extraction:
-contents = exa.get_contents(
-    ["https://en.wikipedia.org/wiki/Artificial_intelligence"],
-    text=True,
-    highlights={"query": "machine learning foundation"}
-)
+contents_resp = requests.post(
+    "https://neutron-gateway.onrender.com/contents",
+    json={
+        "urls": ["https://en.wikipedia.org/wiki/Artificial_intelligence"],
+        "text": True,
+        "highlights": {"query": "machine learning foundation"}
+    }
+).json()
 
 # 3. Find similar documents across domains:
-similar = exa.find_similar(
-    url="https://arxiv.org/abs/2206.02722",
-    num_results=5,
-    exclude_source_domain=True
-)
+similar_resp = requests.post(
+    "https://neutron-gateway.onrender.com/findSimilar",
+    json={
+        "url": "https://arxiv.org/abs/2206.02722",
+        "numResults": 5,
+        "excludeSourceDomain": True
+    }
+).json()
 ```
 
-Interactive developer testing is available directly in the web UI via the **Exa API Playground** tab (`frontend/src/components/PlaygroundView.tsx`).
+Interactive developer testing is available directly in the web UI via the **Retrieval Playground** tab (`frontend/src/components/PlaygroundView.tsx`).
 
 ---
 

@@ -171,7 +171,7 @@ def extract_query_highlights(
     num_highlights: int = 2,
     max_chars_per_highlight: int = 250,
 ) -> List[str]:
-    """Extract Exa-style query-conditioned salient sentences directly answering the query."""
+    """Extract salient query-conditioned sentences directly answering the query."""
     clean_full = _sanitize_prose(" ".join((text or "").split()))
     if not clean_full:
         return []
@@ -232,17 +232,114 @@ def extract_query_highlights(
     return selected or [sentences[0][:max_chars_per_highlight]]
 
 
+def calculate_evaluation_metrics(
+    query: str,
+    docs: List[Dict[str, Any]],
+    answer_text: str = "",
+    citations: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Compute query concept coverage, grounding faithfulness, and confidence grade."""
+    terms = sanitize_fts_terms(query)
+    if not terms:
+        return {
+            "confidence_score": 0.0,
+            "confidence_percent": 0,
+            "query_coverage": 0.0,
+            "grounding_faithfulness": 0.0,
+            "relevance_grade": "Insufficient",
+            "matched_concepts": [],
+            "missing_concepts": [],
+            "evaluation_summary": "Empty or non-tokenizable query.",
+        }
+
+    core_terms = [t for t in terms if len(t) >= 3] or terms
+    evidence_text = " ".join(
+        str(d.get("full_text") or d.get("raw_snippet") or d.get("snippet") or d.get("title") or "")
+        for d in docs[:5]
+    ).lower()
+
+    matched_concepts: List[str] = [t for t in terms if _term_matches_text(t, evidence_text)]
+    missing_concepts: List[str] = [t for t in terms if t not in matched_concepts]
+    query_coverage = round(len(matched_concepts) / max(1, len(terms)), 3)
+
+    grounding_faithfulness = 1.0
+    if answer_text:
+        answer_sents = [s.strip() for s in answer_text.split(". ") if len(s.strip()) > 15]
+        if answer_sents:
+            verified = 0
+            for ans_s in answer_sents:
+                clean_ans = re.sub(r"\[\d+\]", "", ans_s).strip().lower()
+                if any(
+                    _token_jaccard(
+                        clean_ans,
+                        str(d.get("raw_snippet") or d.get("snippet") or d.get("full_text") or "").lower(),
+                    )
+                    > 0.35
+                    for d in docs
+                ):
+                    verified += 1
+            grounding_faithfulness = round(verified / max(1, len(answer_sents)), 3)
+
+    core_matched = [t for t in core_terms if t in matched_concepts]
+    core_coverage = len(core_matched) / max(1, len(core_terms))
+
+    confidence_score = round(
+        (query_coverage * 0.45) + (core_coverage * 0.35) + (grounding_faithfulness * 0.20),
+        3,
+    )
+    confidence_percent = int(round(confidence_score * 100))
+
+    if confidence_score >= 0.75 and query_coverage >= 0.6:
+        relevance_grade = "High"
+        eval_summary = (
+            f"High Confidence ({confidence_percent}%) · "
+            f"{int(query_coverage*100)}% query concept coverage across verified sources"
+        )
+    elif confidence_score >= 0.45 and query_coverage >= 0.4:
+        relevance_grade = "Moderate"
+        eval_summary = (
+            f"Moderate Confidence ({confidence_percent}%) · "
+            f"Partial query coverage ({int(query_coverage*100)}%)"
+        )
+    elif confidence_score >= 0.20:
+        relevance_grade = "Low"
+        eval_summary = (
+            f"Low Confidence ({confidence_percent}%) · "
+            f"Insufficient grounded evidence for query concepts"
+        )
+    else:
+        relevance_grade = "Insufficient"
+        eval_summary = (
+            f"Insufficient Relevance ({confidence_percent}%) · "
+            f"Sources do not verify requested entity"
+        )
+
+    return {
+        "confidence_score": confidence_score,
+        "confidence_percent": confidence_percent,
+        "query_coverage": query_coverage,
+        "grounding_faithfulness": grounding_faithfulness,
+        "relevance_grade": relevance_grade,
+        "matched_concepts": matched_concepts,
+        "missing_concepts": missing_concepts,
+        "evaluation_summary": eval_summary,
+    }
+
+
 def synthesize_grounded_answer(
     query: str,
     docs: List[Dict[str, Any]],
     max_sentences: int = 4,
 ) -> Optional[Dict[str, Any]]:
-    """Synthesize a cited extractive answer from top search hits and payloads."""
+    """Synthesize a cited extractive answer with evaluation metrics and strict grounding."""
     terms = sanitize_fts_terms(query)
     if not terms or not docs:
         return None
 
     normalized_phrase = normalize_search_query(query).lower()
+    core_terms = [t for t in terms if len(t) >= 3] or terms
+    min_core_matches = max(1, min(2, len(core_terms))) if len(core_terms) >= 2 else 1
+
     candidates: List[Tuple[float, str, Dict[str, Any]]] = []
 
     for doc_idx, doc in enumerate(docs[:5]):
@@ -258,18 +355,17 @@ def synthesize_grounded_answer(
             if any(bp in low for bp in _BOILERPLATE_PHRASES):
                 continue
 
-            matched = sum(1 for t in terms if _term_matches_text(t, low))
-            if matched == 0:
-                continue
-            if len(terms) >= 2 and matched < min(2, len(terms)) and sent_idx > 2:
+            core_matched = sum(1 for t in core_terms if _term_matches_text(t, low))
+            if core_matched < min_core_matches and normalized_phrase not in low:
                 continue
 
+            matched = sum(1 for t in terms if _term_matches_text(t, low))
             coverage = matched / len(terms)
-            score = coverage * 20.0 + matched * 3.0
+            score = coverage * 25.0 + core_matched * 5.0
             if len(normalized_phrase) >= 4 and normalized_phrase in low:
-                score += 6.0
+                score += 10.0
             if _DEFINITION_CUE_RE.search(sent):
-                score += 2.5
+                score += 3.0
             score += max(0.0, 2.5 - doc_idx * 0.5)
             score += max(0.0, 1.5 - sent_idx * 0.2)
 
@@ -314,10 +410,23 @@ def synthesize_grounded_answer(
         cite_num = citation_map[url]
         summary_parts.append(f"{sent.rstrip()} [{cite_num}]")
 
+    summary_text = " ".join(summary_parts)
+    eval_metrics = calculate_evaluation_metrics(
+        query,
+        [d for _, d in selected],
+        answer_text=summary_text,
+        citations=citations,
+    )
+
+    # Reject low-confidence or hallucinated answer
+    if eval_metrics["confidence_score"] < 0.35 or eval_metrics["query_coverage"] < 0.35:
+        return None
+
     return {
-        "summary": " ".join(summary_parts),
+        "summary": summary_text,
         "citations": citations,
         "mode": "extractive_grounded",
+        "evaluation": eval_metrics,
     }
 
 
@@ -566,6 +675,15 @@ async def attach_synthesis_and_excerpts(
         if include_markdown:
             clean_doc["full_markdown"] = body_for_excerpt
         formatted_docs.append(clean_doc)
+
+    if answer is not None:
+        if not answer.get("evaluation"):
+            answer["evaluation"] = calculate_evaluation_metrics(
+                query,
+                formatted_docs,
+                answer_text=str(answer.get("summary") or ""),
+                citations=answer.get("citations"),
+            )
 
     return formatted_docs, answer
 

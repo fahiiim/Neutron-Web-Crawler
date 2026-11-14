@@ -275,7 +275,7 @@ _MODE_ADAPTERS: Dict[str, Set[str]] = {
 
 
 def augment_link_query(query: str, mode: str = "all") -> str:
-    """Enhance queries with Exa-style recommendation intent for live web discovery."""
+    """Enhance queries with recommendation intent for live web discovery."""
     q = query.strip()
     low = q.lower()
     if q.startswith('"') or q.endswith('"') or len(q.split()) > 7:

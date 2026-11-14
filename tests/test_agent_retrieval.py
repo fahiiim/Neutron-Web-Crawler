@@ -1,11 +1,13 @@
-"""Unit tests for Exa-style features adopted into Neutron.
+"""Unit tests for Neutron Agent Retrieval and evaluation features.
 
 Validates:
 - Query-conditioned sentence highlights extraction.
-- Exa-style link query augmentation.
+- Agent retrieval link query augmentation.
 - Domain inclusion/exclusion in search and discovery.
 - Batch contents extraction endpoint (/contents).
-- Seed similarity search endpoint (/find_similar).
+- Seed similarity search endpoint (/find_similar and /findSimilar).
+- Evaluation metrics computation (confidence, coverage, faithfulness).
+- Strict relevance floor preventing Frankenstein answer hallucinations.
 """
 
 from __future__ import annotations
@@ -19,10 +21,15 @@ from neutron_rpc.neutron.v1 import neutron_pb
 from services.gateway.app import app
 from spaces.crawler.discovery import augment_link_query
 from spaces.crawler.parser import extract_subpage_candidates
-from spaces.crawler.synthesis import classify_query_intent, extract_query_highlights
+from spaces.crawler.synthesis import (
+    calculate_evaluation_metrics,
+    classify_query_intent,
+    extract_query_highlights,
+    synthesize_grounded_answer,
+)
 
 
-class TestExaAdoptedFeatures(unittest.TestCase):
+class TestAgentRetrievalFeatures(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app)
 
@@ -176,13 +183,23 @@ class TestExaAdoptedFeatures(unittest.TestCase):
         self.assertLessEqual(len(candidates), 3)
 
     @patch("services.gateway.app._execute_gateway_search")
-    def test_exa_post_search_endpoint(self, mock_search):
+    def test_agent_post_search_endpoint(self, mock_search):
         mock_search.return_value = {
             "query": "vector databases",
             "mode": "all",
             "source": "hybrid_jit",
             "total": 1,
             "answer": {"summary": "Vector databases index embeddings."},
+            "evaluation": {
+                "confidence_score": 0.92,
+                "confidence_percent": 92,
+                "query_coverage": 1.0,
+                "grounding_faithfulness": 0.95,
+                "relevance_grade": "High",
+                "matched_concepts": ["vector", "databases"],
+                "missing_concepts": [],
+                "evaluation_summary": "Strictly grounded across 1 citation.",
+            },
             "results": [
                 {
                     "url": "https://example.com/docs",
@@ -225,6 +242,48 @@ class TestExaAdoptedFeatures(unittest.TestCase):
         self.assertIn("highlights", res)
         self.assertIn("subpages", res)
         self.assertEqual(data["answer"], "Vector databases index embeddings.")
+        self.assertIn("evaluation", data)
+        self.assertEqual(data["evaluation"]["confidence_score"], 0.92)
+
+    def test_calculate_evaluation_metrics_grounded(self):
+        query = "how does crispr cas9 gene editing work"
+        docs = [
+            {
+                "url": "https://example.org/crispr",
+                "title": "CRISPR-Cas9 Mechanism",
+                "snippet": "CRISPR-Cas9 enables precise gene editing by utilizing a guide RNA and Cas9 endonuclease.",
+                "score": 0.92,
+            }
+        ]
+        answer_text = "CRISPR-Cas9 enables precise gene editing using guide RNA. [1]"
+        citations = [{"index": 1, "url": "https://example.org/crispr"}]
+        metrics = calculate_evaluation_metrics(query, docs, answer_text, citations)
+        self.assertGreater(metrics["confidence_score"], 0.6)
+        self.assertGreater(metrics["query_coverage"], 0.5)
+        self.assertGreater(metrics["grounding_faithfulness"], 0.8)
+        self.assertIn(metrics["relevance_grade"], ("High", "Moderate"))
+        self.assertIn("crispr", metrics["matched_concepts"])
+
+    def test_strict_relevance_gate_prevents_frankestein_hallucinations(self):
+        # Query about a person should NOT synthesize an answer using unrelated cruise missile text
+        query = "Whos is Md. Fahim Sarker Mridul from GUB"
+        unrelated_docs = [
+            {
+                "url": "https://en.wikipedia.org/wiki/AGM-158_JASSM",
+                "title": "AGM-158 JASSM - Wikipedia",
+                "snippet": "It is a large, stealthy long-range weapon with a 1,000-pound (450 kg) armor piercing warhead.",
+                "score": 0.05,
+            },
+            {
+                "url": "https://arxiv.org/abs/1102.2017v2",
+                "title": "Synthesis of Mechanism for single- and hybrid-tasks using Differential Evolution",
+                "snippet": "The optimal dimensional synthesis for planar mechanism using differential evolution is demonstrated.",
+                "score": 0.04,
+            },
+        ]
+        # Must return None because candidate sentences don't match core query concepts
+        answer = synthesize_grounded_answer(query, unrelated_docs, max_sentences=3)
+        self.assertIsNone(answer)
 
     @patch("services.gateway.app._get_search_client")
     def test_find_similar_camel_case_endpoint(self, mock_get_client):

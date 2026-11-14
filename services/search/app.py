@@ -19,6 +19,7 @@ from services.common.rpc import (
     answer_to_proto,
     configure_cors,
     doc_to_proto,
+    evaluation_to_proto,
     mount_connect_service,
     proto_to_doc,
 )
@@ -29,6 +30,7 @@ from spaces.crawler.logging_utils import get_logger
 from spaces.crawler.middleware import configure_middleware
 from spaces.crawler.synthesis import (
     attach_synthesis_and_excerpts,
+    calculate_evaluation_metrics,
     extract_query_highlights,
     filter_hits_by_mode,
     sort_hits_by_relevance,
@@ -103,12 +105,19 @@ class SearchServiceImpl:
 
         duration_ms = round((time.perf_counter() - t0) * 1000)
 
+        eval_dict = (
+            answer.get("evaluation")
+            if (answer and isinstance(answer, dict))
+            else calculate_evaluation_metrics(clean_query, formatted)
+        )
         proto_answer, has_answer = answer_to_proto(answer)
+        proto_eval = evaluation_to_proto(eval_dict)
         return neutron_pb.QueryIndexResponse(
             results=[doc_to_proto(d, include_full_text=False) for d in formatted],
             answer=proto_answer,
             has_answer=has_answer,
             duration_ms=duration_ms,
+            evaluation=proto_eval,
         )
 
     async def synthesize_answer(
@@ -139,11 +148,18 @@ class SearchServiceImpl:
             gemini_model=settings.GEMINI_MODEL,
             gemini_timeout_seconds=settings.GEMINI_TIMEOUT_SECONDS,
         )
+        eval_dict = (
+            answer.get("evaluation")
+            if (answer and isinstance(answer, dict))
+            else calculate_evaluation_metrics(clean_query, formatted)
+        )
         proto_answer, has_answer = answer_to_proto(answer)
+        proto_eval = evaluation_to_proto(eval_dict)
         return neutron_pb.SynthesizeAnswerResponse(
             results=[doc_to_proto(d, include_full_text=False) for d in formatted],
             answer=proto_answer,
             has_answer=has_answer,
+            evaluation=proto_eval,
         )
 
     async def get_document(

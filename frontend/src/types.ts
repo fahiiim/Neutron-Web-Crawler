@@ -27,10 +27,22 @@ export interface AnswerCitation {
   domain: string;
 }
 
+export interface EvaluationMetrics {
+  confidence_score: number;
+  confidence_percent?: number;
+  query_coverage: number;
+  grounding_faithfulness: number;
+  relevance_grade: string;
+  matched_concepts: string[];
+  missing_concepts: string[];
+  evaluation_summary: string;
+}
+
 export interface GroundedAnswer {
   summary: string;
   citations: AnswerCitation[];
   mode: string;
+  evaluation?: EvaluationMetrics;
 }
 
 export interface DiscoveryMetric {

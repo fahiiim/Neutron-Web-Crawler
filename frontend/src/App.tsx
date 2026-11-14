@@ -14,6 +14,7 @@ import { ArchitectureView } from "./components/ArchitectureView";
 import { PlaygroundView } from "./components/PlaygroundView";
 import type {
   EngineStats,
+  EvaluationMetrics,
   GroundedAnswer,
   SearchMode,
   SearchResult,
@@ -44,6 +45,7 @@ interface CachedSearchEntry {
   ts: number;
   results: SearchResult[];
   answer: GroundedAnswer | null;
+  evaluation?: EvaluationMetrics | null;
 }
 
 function loadCachedSearch(q: string, m: SearchMode): CachedSearchEntry | null {
@@ -63,10 +65,11 @@ function saveCachedSearch(
   m: SearchMode,
   results: SearchResult[],
   answer: GroundedAnswer | null,
+  evaluation?: EvaluationMetrics | null,
 ): void {
   if (!results.length) return;
   try {
-    const entry: CachedSearchEntry = { ts: Date.now(), results, answer };
+    const entry: CachedSearchEntry = { ts: Date.now(), results, answer, evaluation };
     sessionStorage.setItem(
       `${SESSION_CACHE_PREFIX}${m}:${q.toLowerCase()}`,
       JSON.stringify(entry),
@@ -97,6 +100,7 @@ export function App() {
 
   const [results, setResults] = useState<SearchResult[]>([]);
   const [answer, setAnswer] = useState<GroundedAnswer | null>(null);
+  const [queryEvaluation, setQueryEvaluation] = useState<EvaluationMetrics | null>(null);
   const [loading, setLoading] = useState(false);
   const [slowWake, setSlowWake] = useState(false);
   const [crawling, setCrawling] = useState(false);
@@ -207,10 +211,13 @@ export function App() {
         }
         const nextResults: SearchResult[] = Array.isArray(data?.results) ? data.results : [];
         const nextAnswer: GroundedAnswer | null = data?.answer || null;
+        const nextEval: EvaluationMetrics | null =
+          data?.evaluation || nextAnswer?.evaluation || null;
         setResults(nextResults);
         setAnswer(nextAnswer);
+        setQueryEvaluation(nextEval);
         setElapsedMs(Math.round(performance.now() - t0));
-        saveCachedSearch(cleanQuery, searchMode, nextResults, nextAnswer);
+        saveCachedSearch(cleanQuery, searchMode, nextResults, nextAnswer, nextEval);
       } catch (err) {
         setErrorMsg(
           err instanceof Error ? err.message : "Search request failed",
@@ -261,6 +268,7 @@ export function App() {
         if (cached) {
           setResults(cached.results);
           setAnswer(cached.answer);
+          setQueryEvaluation(cached.evaluation || cached.answer?.evaluation || null);
           setElapsedMs(Math.max(1, Math.round(performance.now() - t0)));
           setLoading(false);
           return;
@@ -270,6 +278,7 @@ export function App() {
       setLoading(true);
       setResults([]);
       setAnswer(null);
+      setQueryEvaluation(null);
       setElapsedMs(null);
 
       const streamUrl = apiUrl(
@@ -292,6 +301,9 @@ export function App() {
           }
           if (typeof payload?.duration_ms === "number") {
             setElapsedMs(payload.duration_ms);
+          }
+          if (payload?.evaluation) {
+            setQueryEvaluation(payload.evaluation);
           }
         } catch {
           // Ignore malformed event
@@ -404,11 +416,23 @@ export function App() {
         }
       });
 
+      es.addEventListener("evaluation", (ev: MessageEvent) => {
+        try {
+          const evalPayload = JSON.parse(ev.data);
+          if (evalPayload) setQueryEvaluation(evalPayload);
+        } catch {
+          // Ignore
+        }
+      });
+
       es.addEventListener("answer", (ev: MessageEvent) => {
         try {
           const parsed: GroundedAnswer = JSON.parse(ev.data);
           latestAnswer = parsed;
           setAnswer(parsed);
+          if (parsed?.evaluation) {
+            setQueryEvaluation(parsed.evaluation);
+          }
         } catch {
           // Ignore
         }
@@ -428,12 +452,30 @@ export function App() {
         }
       });
 
-      es.addEventListener("done", () => {
+      es.addEventListener("done", (ev: MessageEvent) => {
         finished = true;
         setLoading(false);
         setCrawling(false);
         setElapsedMs(Math.round(performance.now() - t0));
-        saveCachedSearch(cleanQuery, targetMode, latestResults, latestAnswer);
+        let doneEval: EvaluationMetrics | null = null;
+        try {
+          if (ev.data) {
+            const d = JSON.parse(ev.data);
+            if (d?.evaluation) {
+              doneEval = d.evaluation;
+              setQueryEvaluation((prev) => prev || d.evaluation);
+            }
+          }
+        } catch {
+          // Ignore
+        }
+        saveCachedSearch(
+          cleanQuery,
+          targetMode,
+          latestResults,
+          latestAnswer,
+          latestAnswer?.evaluation || doneEval || queryEvaluation,
+        );
         es.close();
         eventSourceRef.current = null;
         fetchStats();
@@ -654,16 +696,46 @@ export function App() {
           </div>
 
           <div className="max-w-3xl mx-auto px-4 sm:px-6 pt-5 pb-16">
-            <div className="flex items-center justify-between text-xs text-neutral-500 mb-3">
-              <span>
-                {loading && results.length === 0
-                  ? slowWake
-                    ? "Waking backend services..."
-                    : "Searching..."
-                  : `${results.length} ${results.length === 1 ? "result" : "results"}${
-                      elapsedMs !== null ? ` · ${(elapsedMs / 1000).toFixed(2)}s` : ""
+            <div className="flex items-center justify-between text-xs text-neutral-500 mb-3 flex-wrap gap-2">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <span>
+                  {loading && results.length === 0
+                    ? slowWake
+                      ? "Waking backend services..."
+                      : "Searching..."
+                    : `${results.length} ${results.length === 1 ? "result" : "results"}${
+                        elapsedMs !== null ? ` · ${(elapsedMs / 1000).toFixed(2)}s` : ""
+                      }`}
+                </span>
+                {queryEvaluation && !loading && (
+                  <span
+                    className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10.5px] font-mono-tech border ${
+                      queryEvaluation.relevance_grade === "High"
+                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                        : queryEvaluation.relevance_grade === "Low"
+                        ? "border-rose-500/30 bg-rose-500/10 text-rose-300"
+                        : "border-amber-500/30 bg-amber-500/10 text-amber-300"
                     }`}
-              </span>
+                    title={
+                      queryEvaluation.evaluation_summary ||
+                      `Relevance: ${queryEvaluation.relevance_grade} · Confidence: ${
+                        queryEvaluation.confidence_percent ??
+                        Math.round(queryEvaluation.confidence_score * 100)
+                      }%`
+                    }
+                  >
+                    <span>Relevance: {queryEvaluation.relevance_grade}</span>
+                    <span className="opacity-75">
+                      ({queryEvaluation.confidence_percent ??
+                        Math.round(queryEvaluation.confidence_score * 100)}
+                      %)
+                    </span>
+                    <span className="opacity-60 text-[9.5px]">
+                      cov: {Math.round(queryEvaluation.query_coverage * 100)}%
+                    </span>
+                  </span>
+                )}
+              </div>
               {activeQuery && !loading && (
                 <button
                   type="button"
