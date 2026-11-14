@@ -159,6 +159,8 @@ class TestAgentRetrievalFeatures(unittest.TestCase):
         # Neural triggers
         self.assertEqual(classify_query_intent("when bangladesh is established"), "neural")
         self.assertEqual(classify_query_intent("what is quantum computing"), "neural")
+        self.assertEqual(classify_query_intent("whos is Md. Fahim Sarker Mridul from GUB"), "neural")
+        self.assertEqual(classify_query_intent("whose idea was neural search"), "neural")
         self.assertEqual(classify_query_intent("how to build an autonomous agent in python"), "neural")
         self.assertEqual(classify_query_intent("best tools for distributed web scraping"), "neural")
         self.assertEqual(classify_query_intent("compare postgresql vs mongodb for json"), "neural")
@@ -244,6 +246,31 @@ class TestAgentRetrievalFeatures(unittest.TestCase):
         self.assertEqual(data["answer"], "Vector databases index embeddings.")
         self.assertIn("evaluation", data)
         self.assertEqual(data["evaluation"]["confidence_score"], 0.92)
+
+    @patch("services.gateway.app._execute_gateway_search")
+    def test_research_api_returns_evaluation(self, mock_search):
+        mock_search.return_value = {
+            "query": "quantum computing",
+            "mode": "all",
+            "source": "hybrid_jit",
+            "total": 1,
+            "answer": {"summary": "Quantum computing uses qubits."},
+            "evaluation": {
+                "confidence_score": 0.88,
+                "query_coverage": 1.0,
+                "grounding_faithfulness": 0.95,
+                "relevance_grade": "High",
+            },
+            "results": [{"url": "https://example.org/quantum", "title": "Quantum"}],
+            "timings": {"total_ms": 12},
+            "request_id": "test-req",
+        }
+        resp = self.client.get("/api/research?q=quantum+computing")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn("evaluation", data)
+        self.assertEqual(data["evaluation"]["confidence_score"], 0.88)
+        self.assertEqual(data["total"], 1)
 
     def test_calculate_evaluation_metrics_grounded(self):
         query = "how does crispr cas9 gene editing work"

@@ -1067,6 +1067,7 @@ async def research_endpoint(
         "mode": payload["mode"],
         "source": payload["source"],
         "answer": payload["answer"],
+        "evaluation": payload.get("evaluation"),
         "total": payload["total"],
         "sources": payload["results"],
         "timings": payload.get("timings"),

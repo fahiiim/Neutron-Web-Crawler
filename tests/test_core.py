@@ -937,6 +937,14 @@ class TestFastAPIEndpoints(unittest.TestCase):
     def test_joining_sql_stemming_filler_removal_and_reranking(self):
         q = "what is the main purpose of the joining in SQL"
         self.assertEqual(normalize_search_query(q), "joining in SQL")
+        self.assertEqual(
+            normalize_search_query("Whos is Md. Fahim Sarker Mridul from GUB"),
+            "Md. Fahim Sarker Mridul from GUB",
+        )
+        self.assertEqual(
+            normalize_search_query("whose is the highest peak in the world"),
+            "highest peak in the world",
+        )
         self.assertEqual(sanitize_fts_terms(q), ["joining", "sql"])
         fts_tok = _format_fts_term("joining")
         self.assertIn('"join"', fts_tok)

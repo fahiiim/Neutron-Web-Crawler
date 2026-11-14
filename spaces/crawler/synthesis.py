@@ -568,11 +568,20 @@ async def synthesize_with_gemini(
     ]
     referenced = {int(m) for m in re.findall(r"\[(\d+)\]", summary)}
     citations = [c for c in all_citations if c["index"] in referenced] or all_citations[:3]
+    eval_metrics = calculate_evaluation_metrics(
+        query,
+        source_rows,
+        answer_text=summary,
+        citations=citations,
+    )
+    if eval_metrics["confidence_score"] < 0.35 or eval_metrics["query_coverage"] < 0.35:
+        return None
 
     return {
         "summary": summary,
         "citations": citations,
         "mode": "gemini_grounded",
+        "evaluation": eval_metrics,
     }
 
 
@@ -684,6 +693,15 @@ async def attach_synthesis_and_excerpts(
                 answer_text=str(answer.get("summary") or ""),
                 citations=answer.get("citations"),
             )
+        eval_data = answer.get("evaluation")
+        if (
+            isinstance(eval_data, dict)
+            and (
+                float(eval_data.get("confidence_score") or 0.0) < 0.35
+                or float(eval_data.get("query_coverage") or 0.0) < 0.35
+            )
+        ):
+            answer = None
 
     return formatted_docs, answer
 
@@ -707,6 +725,9 @@ def classify_query_intent(query: str) -> str:
     question_starters = (
         "what",
         "who",
+        "whos",
+        "whose",
+        "whom",
         "when",
         "where",
         "why",

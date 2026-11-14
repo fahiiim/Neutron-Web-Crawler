@@ -43,8 +43,7 @@ _SYNONYM_GROUPS = {
 
 _QUESTION_PREFIX_RE = re.compile(
     r"^(what\s+(?:is|are|was|were|does|do|to\s+do\s+to(?:\s+make\s+me)?)\s+(?:the\s+)?(?:(?:name|(?:\w+\s+)?purpose|reason|role|benefit|benefits|meaning|definition|overview|concept)\s+of\s+(?:the\s+)?)?|"
-    r"who(?:'?s|\s+is|\s+are|\s+was|\s+were|\s+invented|\s+wrote|\s+created)?\s+(?:the\s+)?|"
-    r"whos\s+(?:is|are|was|were)?\s*|"
+    r"(?:who\s+(?:invented|wrote|created)\s+(?:the\s+)?|(?:whose|whom|whos|who(?:\'?s)?)\b(?:\s+(?:is|are|was|were))?\s*(?:the\s+)?)|"
     r"when\s+(?:was|were|is|are|did|do|will)?\s*|"
     r"where\s+(?:is|are|was|were|did|do)?\s*|"
     r"how\s+(?:does|do|did|can|to)\s+|"
@@ -57,7 +56,7 @@ _QUESTION_PREFIX_RE = re.compile(
 )
 
 _LEADING_QUESTION_RE = re.compile(
-    r"^(what|who|whos|how|why|which|where|when|tell|can|explain)\b",
+    r"^(what|who|whos|whose|whom|how|why|which|where|when|tell|can|explain)\b",
     flags=re.IGNORECASE,
 )
 
